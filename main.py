@@ -205,8 +205,8 @@ class BaselineImprovementReward(RewardMechanism):
                     )
                 else:
                     rewards[winner.id] = (
-                        reward + score - baseline_score_1,
-                        penalty - baseline_score_1,
+                        reward + min(score - baseline_score_1, self.upper_cap),
+                        penalty - min(baseline_score_1, self.lower_cap),
                     )
         return rewards
 
