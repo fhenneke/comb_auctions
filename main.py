@@ -60,9 +60,6 @@ class SolverFilter(AbstractFilter):
 
 
 class BaselineFilter(AbstractFilter):
-    def __init__(self, solutions: list[Solution]):
-        self.baseline_solutions = self.compute_baseline_solutions(solutions)
-
     def compute_baseline_solutions(
         self, solutions: list[Solution]
     ) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
@@ -91,12 +88,13 @@ class BaselineFilter(AbstractFilter):
 
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         filtered_solutions = []
+        baseline_solutions = self.compute_baseline_solutions(solutions)
         for solution in solutions:
-            if all(
+            if len(solution.scores) == 1 or all(
                 score
                 >= (
-                    self.baseline_solutions[token_pair][0].score()
-                    if token_pair in self.baseline_solutions
+                    baseline_solutions[token_pair][0].score()
+                    if token_pair in baseline_solutions
                     else 0
                 )
                 for token_pair, score in solution.scores.items()
@@ -180,22 +178,20 @@ class BatchSecondPriceReward(RewardMechanism):
 
 
 class BaselineImprovementReward(RewardMechanism):
-    def __init__(
-        self, upper_cap: int, lower_cap: int, solutions: list[Solution]
-    ) -> None:
+    def __init__(self, upper_cap: int, lower_cap: int) -> None:
         self.upper_cap = upper_cap
         self.lower_cap = lower_cap
-        self.baseline_solutions = BaselineFilter(solutions).baseline_solutions
 
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
         rewards: dict[str, tuple[int, int]] = {}
+        baseline_solutions = BaselineFilter().compute_baseline_solutions(solutions)
         for winner in winners:
             rewards[winner.id] = (0, 0)
             for token_pair, score in winner.scores.items():
                 reward, penalty = rewards[winner.id]
-                baseline_1, baseline_2 = self.baseline_solutions.get(
+                baseline_1, baseline_2 = baseline_solutions.get(
                     token_pair, (None, None)
                 )
                 baseline_score_1 = baseline_1.score() if baseline_1 is not None else 0
@@ -250,11 +246,9 @@ class FairCombinatorialAuction(AuctionMechanism):
         2) Choose winners
         3) Compute rewards
         """
-        filter = BaselineFilter(solutions)
+        filter = BaselineFilter()
         winner_selection = MultipleWinners()
-        reward_mechanism = BaselineImprovementReward(
-            upper_cap=50, lower_cap=40, solutions=solutions
-        )
+        reward_mechanism = BaselineImprovementReward(upper_cap=50, lower_cap=40)
 
         filtered_solutions = filter.filter(solutions)
         winners = winner_selection.select_winners(filtered_solutions)
