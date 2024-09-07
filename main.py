@@ -339,6 +339,21 @@ class FairCombinatorialAuction(AuctionMechanism):
         return rewards
 
 
+class GeneralMechanism(AuctionMechanism):
+    def __init__(self, filter, winner_selection, reward_mechanism):
+        self.filter = filter
+        self.winner_selection = winner_selection
+        self.reward_mechanism = reward_mechanism
+
+    def winners_and_rewards(
+        self, solutions: list[Solution]
+    ) -> dict[str, tuple[int, int]]:
+        filtered_solutions = self.filter.filter(solutions)
+        winners = self.winner_selection.select_winners(filtered_solutions)
+        rewards = self.reward_mechanism.compute_rewards(winners, filtered_solutions)
+        return rewards
+
+
 solutions = [
     Solution(
         id="batch winner", solver="solver 1", scores={("A", "B"): 100, ("A", "C"): 50}
@@ -377,6 +392,9 @@ if __name__ == "__main__":
         CIP38(),
         SimpleMultipleWinners(),
         FairCombinatorialAuction(),
+        GeneralMechanism(
+            BaselineFilter(), MultipleWinners(), CompetitionImprovementReward(50, 40)
+        ),
     ]:
         winners_rewards = mechanism.winners_and_rewards(solutions)
         print(winners_rewards)
