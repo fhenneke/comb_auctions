@@ -219,8 +219,8 @@ class CIP38(AuctionMechanism):
         self, solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
         """Select winner by score and reward using second-largest score."""
-        winner = self.winner_selection.select_winners(solutions)[0]
-        rewards = self.reward_mechanism.compute_rewards([winner], solutions)
+        winners = self.winner_selection.select_winners(solutions)
+        rewards = self.reward_mechanism.compute_rewards(winners, solutions)
         return rewards
 
 
