@@ -211,6 +211,91 @@ class BaselineImprovementReward(RewardMechanism):
         return rewards
 
 
+class CompetitionImprovementReward(RewardMechanism):
+    def __init__(
+        self,
+        upper_cap: int,
+        lower_cap: int,
+    ) -> None:
+        self.upper_cap = upper_cap
+        self.lower_cap = lower_cap
+
+    def compute_rewards(
+        self, winners: list[Solution], solutions: list[Solution]
+    ) -> dict[str, tuple[int, int]]:
+        rewards: dict[str, tuple[int, int]] = {}
+        reference_scores = self.compute_reference_solutions(solutions)
+        for winner in winners:
+            rewards[winner.id] = (0, 0)
+            for token_pair, score in winner.scores.items():
+                reward, penalty = rewards[winner.id]
+                baseline_1, baseline_2 = reference_scores.get(token_pair, (None, None))
+                baseline_score_1 = (
+                    baseline_1.scores[token_pair] if baseline_1 is not None else 0
+                )
+                baseline_score_2 = (
+                    baseline_2.scores[token_pair] if baseline_2 is not None else 0
+                )
+                if (
+                    baseline_1 is not None and baseline_1.solver == winner.solver
+                ):  # reference is by winning solver
+                    rewards[winner.id] = (
+                        reward + max(min(score - baseline_score_2, self.upper_cap), 0),
+                        penalty - max(min(baseline_score_2, self.lower_cap), 0),
+                    )
+                else:
+                    rewards[winner.id] = (
+                        reward + max(min(score - baseline_score_1, self.upper_cap), 0),
+                        penalty - max(min(baseline_score_1, self.lower_cap), 0),
+                    )
+        return rewards
+
+    def compute_reference_solutions(
+        self, solutions: list[Solution]
+    ) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
+        """Compute reference solutions per token pair"""
+        reference_solutions: dict[tuple[str, str], tuple[Solution, Solution | None]] = (
+            {}
+        )
+        for solution in solutions:
+            for token_pair, score in solution.scores.items():
+                baseline_1, baseline_2 = reference_solutions.get(
+                    token_pair, (None, None)
+                )
+                baseline_score_1 = 0
+                baseline_score_2 = 0
+                if baseline_1 is not None:
+                    baseline_score_1 = (
+                        baseline_1.scores[token_pair]
+                        if token_pair in baseline_1.scores
+                        else 0
+                    )
+                if baseline_2 is not None:
+                    baseline_score_2 = (
+                        baseline_2.scores[token_pair]
+                        if token_pair in baseline_2.scores
+                        else 0
+                    )
+                if score > baseline_score_2:
+                    if score > baseline_score_1:
+                        if (
+                            baseline_1 is not None
+                            and baseline_1.solver == solution.solver
+                        ):
+                            reference_solutions[token_pair] = (solution, baseline_2)
+                        else:
+                            reference_solutions[token_pair] = (solution, baseline_1)
+                    elif (
+                        baseline_1 is not None and baseline_1.solver != solution.solver
+                    ):
+                        # `baseline_1 is not None` helps mypy, and cannot since
+                        # baseline_score_1 >= score > baseline_score_2 == 0
+                        # implies baseline_score_1 > 0 which is incompatible with baseline_1 == None
+                        reference_solutions[token_pair] = (baseline_1, solution)
+
+        return reference_solutions
+
+
 class CIP38(AuctionMechanism):
     winner_selection = SingleWinner()
     reward_mechanism = BatchSecondPriceReward(upper_cap=150, lower_cap=100)
