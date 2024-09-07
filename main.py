@@ -213,11 +213,7 @@ class BaselineImprovementReward(RewardMechanism):
 
 
 class CompetitionImprovementReward(RewardMechanism):
-    def __init__(
-        self,
-        upper_cap: int,
-        lower_cap: int,
-    ) -> None:
+    def __init__(self, upper_cap: int, lower_cap: int) -> None:
         self.upper_cap = upper_cap
         self.lower_cap = lower_cap
 
