@@ -14,6 +14,36 @@ class Solution:
         return sum(self.scores.values())
 
 
+def compute_reference_solutions(
+    solutions: list[Solution], only_baseline: bool = True
+) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
+    reference_solutions: dict[tuple[str, str], tuple[Solution, Solution | None]] = {}
+    for solution in solutions:
+        if only_baseline and len(solution.scores) > 1:
+            continue
+        for token_pair, score in solution.scores.items():
+            baseline_1, baseline_2 = reference_solutions.get(token_pair, (None, None))
+            baseline_score_1 = 0
+            baseline_score_2 = 0
+            if baseline_1 is not None and token_pair in baseline_1.scores:
+                baseline_score_1 = baseline_1.scores[token_pair]
+            if baseline_2 is not None and token_pair in baseline_2.scores:
+                baseline_score_2 = baseline_2.scores[token_pair]
+            if score > baseline_score_2:
+                if score > baseline_score_1:
+                    if baseline_1 is not None and baseline_1.solver == solution.solver:
+                        reference_solutions[token_pair] = (solution, baseline_2)
+                    else:
+                        reference_solutions[token_pair] = (solution, baseline_1)
+                elif baseline_1 is not None and baseline_1.solver != solution.solver:
+                    # `baseline_1 is not None` helps mypy, and cannot be false since
+                    # baseline_score_1 >= score > baseline_score_2 == 0
+                    # implies baseline_score_1 > 0 which is incompatible with baseline_1 == None
+                    reference_solutions[token_pair] = (baseline_1, solution)
+
+    return reference_solutions
+
+
 class AuctionMechanism(ABC):
     @abstractmethod
     def winners_and_rewards(
@@ -60,35 +90,9 @@ class SolverFilter(AbstractFilter):
 
 
 class BaselineFilter(AbstractFilter):
-    def compute_baseline_solutions(
-        self, solutions: list[Solution]
-    ) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
-        """Compute reference solutions per token pair"""
-        baseline_solutions: dict[tuple[str, str], tuple[Solution, Solution | None]] = {}
-        for solution in solutions:
-            if len(solution.scores) == 1:
-                token_pair = list(solution.scores.keys())[0]
-                score = solution.scores[token_pair]
-                baseline_1, baseline_2 = baseline_solutions.get(
-                    token_pair, (None, None)
-                )
-                baseline_score_1 = baseline_1.score() if baseline_1 is not None else 0
-                baseline_score_2 = baseline_2.score() if baseline_2 is not None else 0
-                if score > baseline_score_2:
-                    if score > baseline_score_1:
-                        baseline_solutions[token_pair] = (solution, baseline_1)
-                    else:
-                        assert baseline_1 is not None
-                        # this helps mypy, and cannot since
-                        # baseline_score_1 >= score > baseline_score_2 == 0
-                        # implies baseline_score_1 > 0 which is incompatible with baseline_1 == None
-                        baseline_solutions[token_pair] = (baseline_1, solution)
-
-        return baseline_solutions
-
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         filtered_solutions = []
-        baseline_solutions = self.compute_baseline_solutions(solutions)
+        baseline_solutions = compute_reference_solutions(solutions)
         for solution in solutions:
             if len(solution.scores) == 1 or all(
                 score
@@ -178,50 +182,21 @@ class BatchSecondPriceReward(RewardMechanism):
         return rewards
 
 
-class BaselineImprovementReward(RewardMechanism):
-    def __init__(self, upper_cap: int, lower_cap: int) -> None:
+class TokenPairImprovementReward(RewardMechanism):
+    def __init__(
+        self, upper_cap: int, lower_cap: int, only_baseline: bool = True
+    ) -> None:
         self.upper_cap = upper_cap
         self.lower_cap = lower_cap
+        self.only_baseline = only_baseline
 
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
         rewards: dict[str, tuple[int, int]] = {}
-        baseline_solutions = BaselineFilter().compute_baseline_solutions(solutions)
-        for winner in winners:
-            rewards[winner.id] = (0, 0)
-            for token_pair, score in winner.scores.items():
-                reward, penalty = rewards[winner.id]
-                baseline_1, baseline_2 = baseline_solutions.get(
-                    token_pair, (None, None)
-                )
-                baseline_score_1 = baseline_1.score() if baseline_1 is not None else 0
-                baseline_score_2 = baseline_2.score() if baseline_2 is not None else 0
-                if (
-                    baseline_1 is not None and baseline_1.solver == winner.solver
-                ):  # reference is by winning solver
-                    rewards[winner.id] = (
-                        reward + min(score - baseline_score_2, self.upper_cap),
-                        penalty - min(baseline_score_2, self.lower_cap),
-                    )
-                else:
-                    rewards[winner.id] = (
-                        reward + min(score - baseline_score_1, self.upper_cap),
-                        penalty - min(baseline_score_1, self.lower_cap),
-                    )
-        return rewards
-
-
-class CompetitionImprovementReward(RewardMechanism):
-    def __init__(self, upper_cap: int, lower_cap: int) -> None:
-        self.upper_cap = upper_cap
-        self.lower_cap = lower_cap
-
-    def compute_rewards(
-        self, winners: list[Solution], solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        rewards: dict[str, tuple[int, int]] = {}
-        reference_scores = self.compute_reference_solutions(solutions)
+        reference_scores = compute_reference_solutions(
+            solutions, only_baseline=self.only_baseline
+        )
         for winner in winners:
             rewards[winner.id] = (0, 0)
             for token_pair, score in winner.scores.items():
@@ -246,51 +221,6 @@ class CompetitionImprovementReward(RewardMechanism):
                         penalty - max(min(baseline_score_1, self.lower_cap), 0),
                     )
         return rewards
-
-    def compute_reference_solutions(
-        self, solutions: list[Solution]
-    ) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
-        """Compute reference solutions per token pair"""
-        reference_solutions: dict[tuple[str, str], tuple[Solution, Solution | None]] = (
-            {}
-        )
-        for solution in solutions:
-            for token_pair, score in solution.scores.items():
-                baseline_1, baseline_2 = reference_solutions.get(
-                    token_pair, (None, None)
-                )
-                baseline_score_1 = 0
-                baseline_score_2 = 0
-                if baseline_1 is not None:
-                    baseline_score_1 = (
-                        baseline_1.scores[token_pair]
-                        if token_pair in baseline_1.scores
-                        else 0
-                    )
-                if baseline_2 is not None:
-                    baseline_score_2 = (
-                        baseline_2.scores[token_pair]
-                        if token_pair in baseline_2.scores
-                        else 0
-                    )
-                if score > baseline_score_2:
-                    if score > baseline_score_1:
-                        if (
-                            baseline_1 is not None
-                            and baseline_1.solver == solution.solver
-                        ):
-                            reference_solutions[token_pair] = (solution, baseline_2)
-                        else:
-                            reference_solutions[token_pair] = (solution, baseline_1)
-                    elif (
-                        baseline_1 is not None and baseline_1.solver != solution.solver
-                    ):
-                        # `baseline_1 is not None` helps mypy, and cannot since
-                        # baseline_score_1 >= score > baseline_score_2 == 0
-                        # implies baseline_score_1 > 0 which is incompatible with baseline_1 == None
-                        reference_solutions[token_pair] = (baseline_1, solution)
-
-        return reference_solutions
 
 
 class CIP38(AuctionMechanism):
@@ -330,7 +260,9 @@ class FairCombinatorialAuction(AuctionMechanism):
         """
         filter = BaselineFilter()
         winner_selection = MultipleWinners()
-        reward_mechanism = BaselineImprovementReward(upper_cap=50, lower_cap=40)
+        reward_mechanism = TokenPairImprovementReward(
+            upper_cap=50, lower_cap=40, only_baseline=True
+        )
 
         filtered_solutions = filter.filter(solutions)
         winners = winner_selection.select_winners(filtered_solutions)
@@ -393,7 +325,9 @@ if __name__ == "__main__":
         SimpleMultipleWinners(),
         FairCombinatorialAuction(),
         GeneralMechanism(
-            BaselineFilter(), MultipleWinners(), CompetitionImprovementReward(50, 40)
+            BaselineFilter(),
+            MultipleWinners(),
+            TokenPairImprovementReward(50, 40, False),
         ),
     ]:
         winners_rewards = mechanism.winners_and_rewards(solutions)
