@@ -131,6 +131,7 @@ class MultipleWinners(WinnerSelection):
 
 
 class RewardMechanism(ABC):
+    @abstractmethod
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
