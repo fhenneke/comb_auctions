@@ -223,54 +223,6 @@ class TokenPairImprovementReward(RewardMechanism):
         return rewards
 
 
-class CIP38(AuctionMechanism):
-    winner_selection = SingleWinner()
-    reward_mechanism = BatchSecondPriceReward(upper_cap=150, lower_cap=100)
-
-    def winners_and_rewards(
-        self, solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        """Select winner by score and reward using second-largest score."""
-        winners = self.winner_selection.select_winners(solutions)
-        rewards = self.reward_mechanism.compute_rewards(winners, solutions)
-        return rewards
-
-
-class SimpleMultipleWinners(AuctionMechanism):
-    winner_selection = MultipleWinners()
-    reward_mechanism = BatchSecondPriceReward(upper_cap=150, lower_cap=100)
-
-    def winners_and_rewards(
-        self, solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        """Iteratively select winner on mechanism with single winner and filtering."""
-        winners = self.winner_selection.select_winners(solutions)
-        rewards = self.reward_mechanism.compute_rewards(winners, solutions)
-        return rewards
-
-
-class FairCombinatorialAuction(AuctionMechanism):
-    def winners_and_rewards(
-        self, solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        """Select winners by filtering on reference solutions
-        1) Compute baseline solutions
-        2) Choose winners
-        3) Compute rewards
-        """
-        filter = BaselineFilter()
-        winner_selection = MultipleWinners()
-        reward_mechanism = TokenPairImprovementReward(
-            upper_cap=50, lower_cap=40, only_baseline=True
-        )
-
-        filtered_solutions = filter.filter(solutions)
-        winners = winner_selection.select_winners(filtered_solutions)
-        rewards = reward_mechanism.compute_rewards(winners, filtered_solutions)
-
-        return rewards
-
-
 class GeneralMechanism(AuctionMechanism):
     def __init__(self, filter, winner_selection, reward_mechanism):
         self.filter = filter
@@ -321,9 +273,21 @@ solutions = [
 # Press the green button in the gutter to run the script.
 if __name__ == "__main__":
     for mechanism in [
-        CIP38(),
-        SimpleMultipleWinners(),
-        FairCombinatorialAuction(),
+        GeneralMechanism(
+            NoFilter(),
+            SingleWinner(),
+            BatchSecondPriceReward(150, 100),
+        ),
+        GeneralMechanism(
+            NoFilter(),
+            MultipleWinners(),
+            BatchSecondPriceReward(150, 100),
+        ),
+        GeneralMechanism(
+            BaselineFilter(),
+            MultipleWinners(),
+            TokenPairImprovementReward(50, 40, True),
+        ),
         GeneralMechanism(
             BaselineFilter(),
             MultipleWinners(),
