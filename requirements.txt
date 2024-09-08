@@ -16,6 +16,8 @@ click==8.1.7
     # via black
 dill==0.3.8
     # via pylint
+greenlet==3.0.3
+    # via sqlalchemy
 idna==3.8
     # via requests
 isort==5.13.2
@@ -36,18 +38,27 @@ platformdirs==4.2.2
     # via
     #   black
     #   pylint
+psycopg[binary]==3.2.1
+    # via -r requirements.in
+psycopg-binary==3.2.1
+    # via psycopg
 pylint==3.2.7
     # via -r requirements.in
 python-dotenv==1.0.1
     # via -r requirements.in
 requests==2.32.3
     # via -r requirements.in
+sqlalchemy==2.0.34
+    # via -r requirements.in
 tomlkit==0.13.2
     # via pylint
 types-requests==2.32.0.20240907
     # via -r requirements.in
 typing-extensions==4.12.2
-    # via mypy
+    # via
+    #   mypy
+    #   psycopg
+    #   sqlalchemy
 urllib3==2.2.2
     # via
     #   requests
