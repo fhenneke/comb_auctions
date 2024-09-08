@@ -1,5 +1,6 @@
 """This is a python script for computing winners and rewards for combinatorial auctions"""
 
+from data_fetching import fetch_solutions
 from mechanism import (
     Solution,
     GeneralMechanism,
@@ -10,6 +11,7 @@ from mechanism import (
     BatchSecondPriceReward,
     TokenPairImprovementReward,
 )
+
 
 solutions = [
     Solution(
@@ -43,28 +45,30 @@ solutions = [
     Solution(id="reference H->I", solver="solver 8", scores={("H", "I"): 50}),
 ]
 
-# Press the green button in the gutter to run the script.
 if __name__ == "__main__":
+    tx_hash = "0x659a6b86aa25c01ba6bc65d63c4204a962f91073767372aa59d89e340aec219b"
+    solutions = fetch_solutions(tx_hash, efficiency_loss=0.01)
+    print(solutions)
     for mechanism in [
         GeneralMechanism(
             NoFilter(),
             SingleWinner(),
-            BatchSecondPriceReward(150, 100),
+            BatchSecondPriceReward(12 * 10**15, 10**16),
         ),
         GeneralMechanism(
             NoFilter(),
             MultipleWinners(),
-            BatchSecondPriceReward(150, 100),
+            BatchSecondPriceReward(12 * 10**15, 10**16),
         ),
         GeneralMechanism(
             BaselineFilter(),
             MultipleWinners(),
-            TokenPairImprovementReward(50, 40, True),
+            TokenPairImprovementReward(12 * 10**15, 10**16, True),
         ),
         GeneralMechanism(
             BaselineFilter(),
             MultipleWinners(),
-            TokenPairImprovementReward(50, 40, False),
+            TokenPairImprovementReward(12 * 10**15, 10**16, False),
         ),
     ]:
         winners_rewards = mechanism.winners_and_rewards(solutions)

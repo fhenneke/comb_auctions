@@ -1,3 +1,7 @@
 black
 pylint
 mypy
+
+python-dotenv
+requests
+types-requests
