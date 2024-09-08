@@ -3,7 +3,7 @@
 from data_fetching import fetch_solutions
 from mechanism import (
     Solution,
-    GeneralMechanism,
+    AuctionMechanism,
     NoFilter,
     BaselineFilter,
     SingleWinner,
@@ -50,22 +50,22 @@ if __name__ == "__main__":
     solutions = fetch_solutions(tx_hash, efficiency_loss=0.01)
     print(solutions)
     for mechanism in [
-        GeneralMechanism(
+        AuctionMechanism(
             NoFilter(),
             SingleWinner(),
             BatchSecondPriceReward(12 * 10**15, 10**16),
         ),
-        GeneralMechanism(
+        AuctionMechanism(
             NoFilter(),
             MultipleWinners(),
             BatchSecondPriceReward(12 * 10**15, 10**16),
         ),
-        GeneralMechanism(
+        AuctionMechanism(
             BaselineFilter(),
             MultipleWinners(),
             TokenPairImprovementReward(12 * 10**15, 10**16, True),
         ),
-        GeneralMechanism(
+        AuctionMechanism(
             BaselineFilter(),
             MultipleWinners(),
             TokenPairImprovementReward(12 * 10**15, 10**16, False),

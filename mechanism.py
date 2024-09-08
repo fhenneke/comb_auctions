@@ -42,16 +42,6 @@ def compute_reference_solutions(
     return reference_solutions
 
 
-class AuctionMechanism(ABC):
-    @abstractmethod
-    def winners_and_rewards(
-        self, solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        """Compute winners and rewards for all solutions.
-        The input is a list of solutions. The output is a dictionary with the ids of winning
-        solutions as keys and a tuple of (reward, penalty) as value."""
-
-
 class AbstractFilter(ABC):
     @abstractmethod
     def filter(self, solutions: list[Solution]) -> list[Solution]:
@@ -221,7 +211,7 @@ class TokenPairImprovementReward(RewardMechanism):
         return rewards
 
 
-class GeneralMechanism(AuctionMechanism):
+class AuctionMechanism:
     def __init__(self, filter, winner_selection, reward_mechanism):
         self.filter = filter
         self.winner_selection = winner_selection
