@@ -71,5 +71,9 @@ if __name__ == "__main__":
             TokenPairImprovementReward(12 * 10**15, 10**16, False),
         ),
     ]:
-        winners_rewards = mechanism.winners_and_rewards(solutions)
-        print(winners_rewards)
+        rewards = mechanism.winners_and_rewards(solutions)
+        print(rewards)
+        print(
+            "total surplus: "
+            f"{sum(solution.score() for solution in solutions if solution.id in rewards)}"
+        )
