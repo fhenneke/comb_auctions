@@ -5,11 +5,18 @@ from typing import Any
 
 from dotenv import load_dotenv
 import requests
+from sqlalchemy import create_engine, text
 
 from mechanism import Solution
 
 load_dotenv()
+
 network = getenv("NETWORK")
+
+database_urls = {
+    "prod": getenv("PROD_DB_URL").replace("NETWORK", network),
+    "barn": getenv("BARN_DB_URL").replace("NETWORK", network),
+}
 
 orderbook_urls = {
     "prod": f"https://api.cow.fi/{network}/api/v1/",
@@ -54,6 +61,15 @@ def fetch_order_data(
             response.raise_for_status()
             order_data[order_uid] = response.json()
     return order_data
+
+
+def fetch_computition_data(start_id: int, end_id: int) -> list[dict[str, Any]]:
+    engine = create_engine("postgresql+psycopg://" + database_urls["prod"], echo=True)
+    with engine.connect() as connection:
+        result = connection.execute(
+            text("select * from solver_competitions order by id desc limit 10")
+        )
+        print(result)
 
 
 def aggregate_solution_data(
@@ -118,4 +134,5 @@ if __name__ == "__main__":
     # environment, competition_data = fetch_competition_data(tx_hash)
     # order_data = fetch_order_data(environment, competition_data)
     solutions = fetch_solutions(tx_hash)
+    fetch_computition_data(1, 1)
     print(solutions)
