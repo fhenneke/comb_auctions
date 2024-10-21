@@ -3,13 +3,32 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class Trade:
+    id: str
+    sell_token: str
+    buy_token: str
+    score: int
+
+
+@dataclass(frozen=True)
 class Solution:
     id: str
     solver: str
-    scores: dict[tuple[str, str], int]
+    trades: list[Trade]
+    # scores: dict[tuple[str, str], int]
 
     def score(self):
-        return sum(self.scores.values())
+        return sum(trade.score for trade in self.trades)
+        # return sum(self.scores.values())
+
+
+def aggregate_scores(solution: Solution) -> dict[tuple[str, str], int]:
+    scores: dict[tuple[str, str], int] = {}
+    for trade in solution.trades:
+        scores[(trade.sell_token, trade.buy_token)] = (
+            scores.get((trade.sell_token, trade.buy_token), 0) + trade.score
+        )
+    return scores
 
 
 def compute_reference_solutions(
@@ -17,16 +36,19 @@ def compute_reference_solutions(
 ) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
     reference_solutions: dict[tuple[str, str], tuple[Solution, Solution | None]] = {}
     for solution in solutions:
-        if only_baseline and len(solution.scores) > 1:
+        aggregated_scores = aggregate_scores(solution)
+        if only_baseline and len(aggregated_scores) > 1:
             continue
-        for token_pair, score in solution.scores.items():
+        for token_pair, score in aggregated_scores.items():
             baseline_1, baseline_2 = reference_solutions.get(token_pair, (None, None))
             baseline_score_1 = 0
             baseline_score_2 = 0
-            if baseline_1 is not None and token_pair in baseline_1.scores:
-                baseline_score_1 = baseline_1.scores[token_pair]
-            if baseline_2 is not None and token_pair in baseline_2.scores:
-                baseline_score_2 = baseline_2.scores[token_pair]
+            if baseline_1 is not None:
+                baseline_scores_1 = aggregate_scores(baseline_1)
+                baseline_score_1 = baseline_scores_1.get(token_pair, 0)
+            if baseline_2 is not None:
+                baseline_scores_2 = aggregate_scores(baseline_2)
+                baseline_score_2 = baseline_scores_2.get(token_pair, 0)
             if score > baseline_score_2:
                 if score > baseline_score_1:
                     if baseline_1 is not None and baseline_1.solver == solution.solver:
@@ -53,15 +75,16 @@ class NoFilter(AbstractFilter):
         return list(solutions)
 
 
-class OverlapFilter(AbstractFilter):
+class DirectedTokenPairOverlapFilter(AbstractFilter):
     def __init__(self, solution: Solution):
-        self._solution = solution
+        self.aggregated_scores = aggregate_scores(solution)
 
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         filtered_solutions = [
             solution
             for solution in solutions
-            if len(solution.scores.keys() & self._solution.scores.keys()) == 0
+            if len(aggregate_scores(solution).keys() & self.aggregated_scores.keys())
+            == 0
         ]
         return filtered_solutions
 
@@ -82,14 +105,15 @@ class BaselineFilter(AbstractFilter):
         filtered_solutions = []
         baseline_solutions = compute_reference_solutions(solutions)
         for solution in solutions:
-            if len(solution.scores) == 1 or all(
+            aggregated_scores = aggregate_scores(solution)
+            if len(aggregated_scores) == 1 or all(
                 score
                 >= (
                     baseline_solutions[token_pair][0].score()
                     if token_pair in baseline_solutions
                     else 0
                 )
-                for token_pair, score in solution.scores.items()
+                for token_pair, score in aggregated_scores.items()
             ):
                 filtered_solutions.append(solution)
         return filtered_solutions
@@ -117,7 +141,9 @@ class MultipleWinners(WinnerSelection):
                 remaining_solutions
             )[0]
             winners.append(new_winner)
-            remaining_solutions = OverlapFilter(new_winner).filter(remaining_solutions)
+            remaining_solutions = DirectedTokenPairOverlapFilter(new_winner).filter(
+                remaining_solutions
+            )
 
         return winners
 
@@ -165,7 +191,9 @@ class BatchSecondPriceReward(RewardMechanism):
             )
 
             remaining_winners.remove(winner)
-            remaining_solutions = OverlapFilter(winner).filter(remaining_solutions)
+            remaining_solutions = DirectedTokenPairOverlapFilter(winner).filter(
+                remaining_solutions
+            )
 
         return rewards
 
@@ -187,14 +215,19 @@ class TokenPairImprovementReward(RewardMechanism):
         )
         for winner in winners:
             rewards[winner.id] = (0, 0)
-            for token_pair, score in winner.scores.items():
+            aggregated_scores = aggregate_scores(winner)
+            for token_pair, score in aggregated_scores.items():
                 reward, penalty = rewards[winner.id]
                 baseline_1, baseline_2 = reference_scores.get(token_pair, (None, None))
                 baseline_score_1 = (
-                    baseline_1.scores[token_pair] if baseline_1 is not None else 0
+                    aggregate_scores(baseline_1)[token_pair]
+                    if baseline_1 is not None
+                    else 0
                 )
                 baseline_score_2 = (
-                    baseline_2.scores[token_pair] if baseline_2 is not None else 0
+                    aggregate_scores(baseline_2)[token_pair]
+                    if baseline_2 is not None
+                    else 0
                 )
                 if (
                     baseline_1 is not None and baseline_1.solver == winner.solver
@@ -212,15 +245,15 @@ class TokenPairImprovementReward(RewardMechanism):
 
 
 class AuctionMechanism:
-    def __init__(self, filter, winner_selection, reward_mechanism):
-        self.filter = filter
+    def __init__(self, solution_filter, winner_selection, reward_mechanism):
+        self.solution_filter = solution_filter
         self.winner_selection = winner_selection
         self.reward_mechanism = reward_mechanism
 
     def winners_and_rewards(
         self, solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
-        filtered_solutions = self.filter.filter(solutions)
+        filtered_solutions = self.solution_filter.filter(solutions)
         winners = self.winner_selection.select_winners(filtered_solutions)
         rewards = self.reward_mechanism.compute_rewards(winners, filtered_solutions)
         return rewards

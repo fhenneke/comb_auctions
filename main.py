@@ -2,6 +2,7 @@
 
 from data_fetching import fetch_solutions
 from mechanism import (
+    Trade,
     Solution,
     AuctionMechanism,
     NoFilter,
@@ -15,34 +16,38 @@ from mechanism import (
 
 solutions = [
     Solution(
-        id="batch winner", solver="solver 1", scores={("A", "B"): 100, ("A", "C"): 50}
+        id="batch winner",
+        solver="solver 1",
+        trades=[Trade("1", "A", "B", 100), Trade("2", "A", "C", 50)],
     ),
     Solution(
-        id="unfair batch", solver="solver 2", scores={("A", "B"): 50, ("A", "C"): 60}
+        id="unfair batch",
+        solver="solver 2",
+        trades=[Trade("1", "A", "B", 50), Trade("2", "A", "C", 60)],
     ),
     Solution(
         id="overlapping batch",
         solver="solver 3",
-        scores={("B", "A"): 50, ("A", "C"): 50},
+        trades=[Trade("3", "B", "A", 50), Trade("2", "A", "C", 50)],
     ),
     Solution(
         id="non-overlapping batch",
         solver="solver 4",
-        scores={("B", "A"): 40, ("D", "E"): 50},
+        trades=[Trade("3", "B", "A", 40), Trade("4", "D", "E", 60)],
     ),
     Solution(
         id="non-overlapping batch unfair",
         solver="solver 5",
-        scores={("B", "A"): 20, ("D", "E"): 100},
+        trades=[Trade("3", "B", "A", 20), Trade("4", "D", "E", 100)],
     ),
-    Solution(id="reference A->B", solver="solver 1", scores={("A", "B"): 80}),
-    Solution(id="runner up A->B", solver="solver 2", scores={("A", "B"): 40}),
-    Solution(id="reference A->C", solver="solver 2", scores={("A", "C"): 40}),
-    Solution(id="runner up A->C", solver="solver 1", scores={("A", "C"): 40}),
-    Solution(id="reference B->A", solver="solver 7", scores={("B", "A"): 30}),
-    Solution(id="reference F->G", solver="solver 8", scores={("F", "G"): 50}),
-    Solution(id="runner up F->G", solver="solver 1", scores={("F", "G"): 40}),
-    Solution(id="reference H->I", solver="solver 8", scores={("H", "I"): 50}),
+    Solution(id="reference A->B", solver="solver 1", trades=[Trade("1", "A", "B", 80)]),
+    Solution(id="runner up A->B", solver="solver 2", trades=[Trade("1", "A", "B", 40)]),
+    Solution(id="reference A->C", solver="solver 2", trades=[Trade("2", "A", "C", 40)]),
+    Solution(id="runner up A->C", solver="solver 1", trades=[Trade("2", "A", "C", 40)]),
+    Solution(id="reference B->A", solver="solver 7", trades=[Trade("3", "B", "A", 30)]),
+    Solution(id="reference F->G", solver="solver 8", trades=[Trade("5", "F", "G", 50)]),
+    Solution(id="runner up F->G", solver="solver 1", trades=[Trade("5", "F", "G", 40)]),
+    Solution(id="reference H->I", solver="solver 8", trades=[Trade("6", "H", "I", 50)]),
 ]
 
 if __name__ == "__main__":
@@ -78,7 +83,7 @@ if __name__ == "__main__":
             f"{sum(solution.score() for solution in solutions if solution.id in rewards)}"
         )
 
-    filtered_solutions = mechanism.filter.filter(solutions)
+    filtered_solutions = mechanism.solution_filter.filter(solutions)
     winners = mechanism.winner_selection.select_winners(filtered_solutions)
     rewards = mechanism.reward_mechanism.compute_rewards(winners, filtered_solutions)
     print(

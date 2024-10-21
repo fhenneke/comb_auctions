@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 import requests
 from sqlalchemy import create_engine, text
 
-from mechanism import Solution
+from mechanism import Solution, Trade, aggregate_scores
 
 load_dotenv()
 
@@ -63,7 +63,7 @@ def fetch_order_data(
     return order_data
 
 
-def fetch_computition_data(start_id: int, end_id: int) -> list[dict[str, Any]]:
+def fetch_competition_data_batch(start_id: int, end_id: int) -> list[dict[str, Any]]:
     engine = create_engine("postgresql+psycopg://" + database_urls["prod"], echo=True)
     with engine.connect() as connection:
         result = connection.execute(
@@ -79,20 +79,20 @@ def aggregate_solution_data(
     native_prices: list[dict[str, Any]] = competition_data["auction"]["prices"]
 
     solutions = []
-    for id, solution in enumerate(solution_data):
+    for solution_id, solution in enumerate(solution_data):
         solver = solution["solverAddress"]
-        scores: dict[tuple[str, str], int] = {}
+        trades: list[Trade] = []
         for order_execution in solution["orders"]:
-            order = order_data[order_execution["id"]]
+            order_id: str = order_execution["id"]
+            order = order_data[order_id]
             sell_token = order["sellToken"]
             buy_token = order["buyToken"]
 
             surplus = compute_surplus(order, order_execution, native_prices)
-            scores[(sell_token, buy_token)] = (
-                scores.get((sell_token, buy_token), 0) + surplus
-            )
 
-        solution_obj = Solution(id=str(id), solver=solver, scores=scores)
+            trades.append(Trade(order_id, sell_token, buy_token, surplus))
+
+        solution_obj = Solution(id=str(solution_id), solver=solver, trades=trades)
         solutions.append(solution_obj)
 
     return solutions
@@ -119,12 +119,17 @@ def fetch_solutions(tx_hash: str, efficiency_loss: float = 0.0) -> list[Solution
     solutions: list[Solution] = []
     for solution in submitted_solutions:
         solutions.append(solution)
-        if len(solution.scores) > 1:
-            for token_pair, score in solution.scores.items():
-                id = solution.id + "-" + str(token_pair)
+        scores = aggregate_scores(solution)
+        if len(scores) > 1:
+            for token_pair in scores:
+                solution_id = solution.id + "-" + str(token_pair)
                 solver = solution.solver
-                scores = {token_pair: round(score * (1 - efficiency_loss))}
-                solutions.append(Solution(id, solver, scores))
+                trades = [
+                    trade
+                    for trade in solution.trades
+                    if (trade.sell_token, trade.buy_token) == token_pair
+                ]
+                solutions.append(Solution(solution_id, solver, trades))
 
     return solutions
 
@@ -134,5 +139,5 @@ if __name__ == "__main__":
     # environment, competition_data = fetch_competition_data(tx_hash)
     # order_data = fetch_order_data(environment, competition_data)
     solutions = fetch_solutions(tx_hash)
-    fetch_computition_data(1, 1)
+    fetch_competition_data_batch(1, 1)
     print(solutions)
