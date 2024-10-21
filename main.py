@@ -77,3 +77,11 @@ if __name__ == "__main__":
             "total surplus: "
             f"{sum(solution.score() for solution in solutions if solution.id in rewards)}"
         )
+
+    filtered_solutions = mechanism.filter.filter(solutions)
+    winners = mechanism.winner_selection.select_winners(filtered_solutions)
+    rewards = mechanism.reward_mechanism.compute_rewards(winners, filtered_solutions)
+    print(
+        "total surplus: "
+        f"{sum(solution.score() for solution in solutions if solution.id in rewards)}"
+    )
