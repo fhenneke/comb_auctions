@@ -7,26 +7,24 @@ class Trade:
     id: str
     sell_token: str
     buy_token: str
-    score: int
+    score: int | None = None
 
 
 @dataclass(frozen=True)
 class Solution:
     id: str
     solver: str
+    score: int
     trades: list[Trade]
     # scores: dict[tuple[str, str], int]
-
-    def score(self):
-        return sum(trade.score for trade in self.trades)
-        # return sum(self.scores.values())
 
 
 def aggregate_scores(solution: Solution) -> dict[tuple[str, str], int]:
     scores: dict[tuple[str, str], int] = {}
     for trade in solution.trades:
+        score = trade.score if trade.score is not None else 0
         scores[(trade.sell_token, trade.buy_token)] = (
-            scores.get((trade.sell_token, trade.buy_token), 0) + trade.score
+            scores.get((trade.sell_token, trade.buy_token), 0) + score
         )
     return scores
 
@@ -109,7 +107,7 @@ class BaselineFilter(AbstractFilter):
             if len(aggregated_scores) == 1 or all(
                 score
                 >= (
-                    baseline_solutions[token_pair][0].score()
+                    baseline_solutions[token_pair][0].score
                     if token_pair in baseline_solutions
                     else 0
                 )
@@ -127,7 +125,7 @@ class WinnerSelection(ABC):
 
 class SingleWinner(WinnerSelection):
     def select_winners(self, solutions: list[Solution]) -> list[Solution]:
-        return [sorted(solutions, key=lambda solution: solution.score())[-1]]
+        return [sorted(solutions, key=lambda solution: solution.score)[-1]]
 
 
 class MultipleWinners(WinnerSelection):
@@ -182,11 +180,11 @@ class BatchSecondPriceReward(RewardMechanism):
             reference_score = 0
             if reference_solutions:
                 reference_score = (
-                    SingleWinner().select_winners(reference_solutions)[0].score()
+                    SingleWinner().select_winners(reference_solutions)[0].score
                 )
 
             rewards[winner.id] = (
-                min(winner.score() - reference_score, self.upper_cap),
+                min(winner.score - reference_score, self.upper_cap),
                 -min(reference_score, self.lower_cap),
             )
 

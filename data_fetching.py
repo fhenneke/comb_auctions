@@ -81,6 +81,7 @@ def aggregate_solution_data(
     solutions = []
     for solution_id, solution in enumerate(solution_data):
         solver = solution["solverAddress"]
+        score = int(solution["score"])
         trades: list[Trade] = []
         for order_execution in solution["orders"]:
             order_id: str = order_execution["id"]
@@ -92,7 +93,9 @@ def aggregate_solution_data(
 
             trades.append(Trade(order_id, sell_token, buy_token, surplus))
 
-        solution_obj = Solution(id=str(solution_id), solver=solver, trades=trades)
+        solution_obj = Solution(
+            id=str(solution_id), solver=solver, score=score, trades=trades
+        )
         solutions.append(solution_obj)
 
     return solutions
@@ -111,7 +114,9 @@ def compute_surplus(order, order_execution, native_prices) -> int:
     return surplus_eth
 
 
-def fetch_solutions(tx_hash: str, efficiency_loss: float = 0.0) -> list[Solution]:
+def fetch_solutions(
+    tx_hash: str, split_solutions: bool = False, efficiency_loss: float = 0.0
+) -> list[Solution]:
     environment, competition_data = fetch_competition_data(tx_hash)
     order_data = fetch_order_data(environment, competition_data)
     submitted_solutions = aggregate_solution_data(competition_data, order_data)
@@ -120,7 +125,7 @@ def fetch_solutions(tx_hash: str, efficiency_loss: float = 0.0) -> list[Solution
     for solution in submitted_solutions:
         solutions.append(solution)
         scores = aggregate_scores(solution)
-        if len(scores) > 1:
+        if len(scores) > 1 and split_solutions:
             for token_pair in scores:
                 solution_id = solution.id + "-" + str(token_pair)
                 solver = solution.solver
@@ -129,7 +134,11 @@ def fetch_solutions(tx_hash: str, efficiency_loss: float = 0.0) -> list[Solution
                     for trade in solution.trades
                     if (trade.sell_token, trade.buy_token) == token_pair
                 ]
-                solutions.append(Solution(solution_id, solver, trades))
+                assert all(
+                    trade.score is not None for trade in trades
+                ), f"score not set for all trades: {trades}"
+                score = sum(trade.score for trade in trades if trade.score is not None)
+                solutions.append(Solution(solution_id, solver, score, trades))
 
     return solutions
 
