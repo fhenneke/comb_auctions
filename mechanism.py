@@ -242,7 +242,15 @@ class TokenPairImprovementReward(RewardMechanism):
         return rewards
 
 
-class AuctionMechanism:
+class AuctionMechanism(ABC):
+    @abstractmethod
+    def winners_and_rewards(
+        self, solutions: list[Solution]
+    ) -> dict[str, tuple[int, int]]:
+        """Select winners and compute their rewards"""
+
+
+class FilterRankRewardMechanism(AuctionMechanism):
     def __init__(self, solution_filter, winner_selection, reward_mechanism):
         self.solution_filter = solution_filter
         self.winner_selection = winner_selection
