@@ -1,6 +1,6 @@
 """This is a python script for computing winners and rewards for combinatorial auctions"""
 
-from data_fetching import fetch_solutions
+from data_fetching import fetch_solutions, fetch_solutions_batch
 from mechanism import (
     Trade,
     Solution,
@@ -96,42 +96,48 @@ solutions = [
 ]
 
 if __name__ == "__main__":
-    # tx_hash = "0x659a6b86aa25c01ba6bc65d63c4204a962f91073767372aa59d89e340aec219b"
-    # solutions = fetch_solutions(tx_hash, efficiency_loss=0.01)
-    print(solutions)
-    for mechanism in [
-        FilterRankRewardMechanism(
-            NoFilter(),
-            SingleWinner(),
-            BatchSecondPriceReward(12 * 10**15, 10**16),
-        ),
-        FilterRankRewardMechanism(
-            NoFilter(),
-            MultipleWinners(),
-            BatchSecondPriceReward(12 * 10**15, 10**16),
-        ),
-        FilterRankRewardMechanism(
-            BaselineFilter(),
-            MultipleWinners(),
-            TokenPairImprovementReward(12 * 10**15, 10**16, True),
-        ),
-        FilterRankRewardMechanism(
-            BaselineFilter(),
-            MultipleWinners(),
-            TokenPairImprovementReward(12 * 10**15, 10**16, False),
-        ),
-    ]:
-        rewards = mechanism.winners_and_rewards(solutions)
-        print(rewards)
-        print(
-            "total surplus: "
-            f"{sum(solution.score for solution in solutions if solution.id in rewards)}"
-        )
+    # solutions = fetch_solutions(
+    #     "0x659a6b86aa25c01ba6bc65d63c4204a962f91073767372aa59d89e340aec219b",
+    #     split_solutions=True,
+    #     efficiency_loss=0.01,
+    # )
+    solutions_batch = fetch_solutions_batch(9534992 - 100, 9534992)
 
-    filtered_solutions = mechanism.solution_filter.filter(solutions)
-    winners = mechanism.winner_selection.select_winners(filtered_solutions)
-    rewards = mechanism.reward_mechanism.compute_rewards(winners, filtered_solutions)
-    print(
-        "total surplus: "
-        f"{sum(solution.score for solution in solutions if solution.id in rewards)}"
-    )
+    for solutions in solutions_batch:
+        print(solutions)
+        for mechanism in [
+            FilterRankRewardMechanism(
+                NoFilter(),
+                SingleWinner(),
+                BatchSecondPriceReward(12 * 10**15, 10**16),
+            ),
+            FilterRankRewardMechanism(
+                NoFilter(),
+                MultipleWinners(),
+                BatchSecondPriceReward(12 * 10**15, 10**16),
+            ),
+            FilterRankRewardMechanism(
+                BaselineFilter(),
+                MultipleWinners(),
+                TokenPairImprovementReward(12 * 10**15, 10**16, True),
+            ),
+            FilterRankRewardMechanism(
+                BaselineFilter(),
+                MultipleWinners(),
+                TokenPairImprovementReward(12 * 10**15, 10**16, False),
+            ),
+        ]:
+            rewards = mechanism.winners_and_rewards(solutions)
+            print(rewards)
+            print(
+                "total surplus: "
+                f"{sum(solution.score for solution in solutions if solution.id in rewards)}"
+            )
+
+    # filtered_solutions = mechanism.solution_filter.filter(solutions)
+    # winners = mechanism.winner_selection.select_winners(filtered_solutions)
+    # rewards = mechanism.reward_mechanism.compute_rewards(winners, filtered_solutions)
+    # print(
+    #     "total surplus: "
+    #     f"{sum(solution.score for solution in solutions if solution.id in rewards)}"
+    # )
