@@ -19,6 +19,38 @@ from mechanism import (
 )
 
 
+def compute_reward_statistic(solutions_batch, rewards_batch):
+    print(f"number of auction: {len(solutions_batch)}\n")
+    print(
+        "average number of winners:\n"
+        f"single winner: {sum(len(rewards[0]) for rewards in rewards_batch) / len(rewards_batch)}\n"
+        f"multiple winners: {sum(len(rewards[1]) for rewards in rewards_batch) / len(rewards_batch)}\n"
+        f"vcg winners: {sum(len(rewards[2]) for rewards in rewards_batch) / len(rewards_batch)}\n"
+    )
+    solutions_batch_dicts = [
+        {solution.id: solution for solution in solutions}
+        for solutions in solutions_batch
+    ]
+    print(
+        "average total score:\n"
+        f"single winner: {sum(sum(solutions_batch_dicts[i][solution_id].score for solution_id in rewards[0]) for i, rewards in enumerate(rewards_batch)) / len(rewards_batch)}\n"
+        f"multiple winners: {sum(sum(solutions_batch_dicts[i][solution_id].score for solution_id in rewards[1]) for i, rewards in enumerate(rewards_batch)) / len(rewards_batch)}\n"
+        f"vcg winners: {sum(sum(solutions_batch_dicts[i][solution_id].score for solution_id in rewards[2]) for i, rewards in enumerate(rewards_batch)) / len(rewards_batch)}\n"
+    )
+    print(
+        "average rewards per winner:\n"
+        f"single winner: {sum(sum(reward for reward, _ in rewards[0].values()) for rewards in rewards_batch) / sum(len(rewards[0]) for rewards in rewards_batch) / 10**18}\n"
+        f"multiple winners: {sum(sum(reward for reward, _ in rewards[1].values()) for rewards in rewards_batch) / sum(len(rewards[1]) for rewards in rewards_batch) / 10**18}\n"
+        f"vcg winners: {sum(sum(reward for reward, _ in rewards[2].values()) for rewards in rewards_batch) / sum(len(rewards[2]) for rewards in rewards_batch) / 10**18}\n"
+    )
+    print(
+        "average rewards/penalties:\n"
+        f"single winner: {sum(sum(penalty for _, penalty in rewards[0].values()) for rewards in rewards_batch) / sum(len(rewards[0]) for rewards in rewards_batch) / 10**18}\n"
+        f"multiple winners: {sum(sum(penalty for _, penalty in rewards[1].values()) for rewards in rewards_batch) / sum(len(rewards[1]) for rewards in rewards_batch) / 10**18}\n"
+        f"vcg winners: {sum(sum(penalty for _, penalty in rewards[2].values()) for rewards in rewards_batch) / sum(len(rewards[2]) for rewards in rewards_batch) / 10**18}\n"
+    )
+
+
 solutions_batch = [
     [  # batch vs single order solutions
         Solution(
@@ -206,8 +238,6 @@ if __name__ == "__main__":
     # ]
     solutions_batch = fetch_solutions_batch(9499893, 9532691)
 
-    print(f"number of auctions: {len(solutions_batch)}")
-
     mechanisms = [
         FilterRankRewardMechanism(
             NoFilter(),
@@ -258,4 +288,4 @@ if __name__ == "__main__":
 
         all_rewards.append(rewards)
 
-    print(all_rewards)
+    compute_reward_statistic(solutions_batch, all_rewards)
