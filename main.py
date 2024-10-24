@@ -204,7 +204,7 @@ if __name__ == "__main__":
     #         efficiency_loss=0.01,
     #     )
     # ]
-    solutions_batch = fetch_solutions_batch(9534992 - 1000, 9534992)
+    solutions_batch = fetch_solutions_batch(9499893, 9532691)
 
     print(f"number of auctions: {len(solutions_batch)}")
 
