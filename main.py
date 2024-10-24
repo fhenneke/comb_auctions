@@ -213,11 +213,6 @@ if __name__ == "__main__":
             SingleWinner(),
             BatchSecondPriceReward(12 * 10**15, 10**16),
         ),
-        # FilterRankRewardMechanism(
-        #     NoFilter(),
-        #     TokenPairFilteringWinners(),
-        #     BatchSecondPriceReward(12 * 10**15, 10**16),
-        # ),
         FilterRankRewardMechanism(
             NoFilter(),
             SubsetFilteringWinners(
@@ -225,16 +220,27 @@ if __name__ == "__main__":
             ),
             BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
         ),
-        # FilterRankRewardMechanism(
-        #     BaselineFilter(),
-        #     TokenPairFilteringWinners(),
-        #     TokenPairImprovementReward(12 * 10**15, 10**16, True),
-        # ),
-        # FilterRankRewardMechanism(
-        #     BaselineFilter(),
-        #     TokenPairFilteringWinners(),
-        #     TokenPairImprovementReward(12 * 10**15, 10**16, False),
-        # ),
+        FilterRankRewardMechanism(
+            NoFilter(),
+            SubsetFilteringWinners(
+                filtering_function=TradedTokens(), cumulative_filtering=False
+            ),
+            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+        ),
+        FilterRankRewardMechanism(
+            NoFilter(),
+            SubsetFilteringWinners(
+                filtering_function=TokenPairs(), cumulative_filtering=True
+            ),
+            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+        ),
+        FilterRankRewardMechanism(
+            NoFilter(),
+            SubsetFilteringWinners(
+                filtering_function=TokenPairs(), cumulative_filtering=False
+            ),
+            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+        ),
     ]
     all_rewards: list[list[dict[str, tuple[int, int]]]] = []
     for solutions in solutions_batch:
@@ -246,4 +252,3 @@ if __name__ == "__main__":
         all_rewards.append(rewards)
 
     print(all_rewards)
-
