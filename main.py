@@ -277,6 +277,8 @@ if __name__ == "__main__":
             SubsetFilteringWinners(
                 filtering_function=TradedTokens(), cumulative_filtering=True
             ),
+            12 * 10**15,
+            10**16,
         ),
     ]
     all_rewards: list[list[dict[str, tuple[int, int]]]] = []

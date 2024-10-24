@@ -351,6 +351,8 @@ class FilterRankRewardMechanism(AuctionMechanism):
 class VCGRewardMechanism(AuctionMechanism):
     solution_filter: AbstractFilter
     winner_selection: WinnerSelection
+    upper_cap: int
+    lower_cap: int
 
     def winners_and_rewards(
         self, solutions: list[Solution]
@@ -386,8 +388,8 @@ class VCGRewardMechanism(AuctionMechanism):
             new_winners = self.winner_selection.select_winners(remaining_solutions)
             reference_score = self.compute_total_score(new_winners)
             rewards[winner.id] = (
-                total_score - reference_score,
-                (total_score - reference_score) - winner.score,
+                min(total_score - reference_score, self.upper_cap),
+                max((total_score - reference_score) - winner.score, -self.lower_cap),
             )
 
         return rewards
