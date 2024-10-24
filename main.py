@@ -203,52 +203,47 @@ if __name__ == "__main__":
     #         efficiency_loss=0.01,
     #     )
     # ]
-    # solutions_batch = fetch_solutions_batch(9534992 - 1000, 9534992)
+    solutions_batch = fetch_solutions_batch(9534992 - 1000, 9534992)
 
-    print(len(solutions_batch))
+    print(f"number of auctions: {len(solutions_batch)}")
 
+    mechanisms = [
+        FilterRankRewardMechanism(
+            NoFilter(),
+            SingleWinner(),
+            BatchSecondPriceReward(12 * 10**15, 10**16),
+        ),
+        # FilterRankRewardMechanism(
+        #     NoFilter(),
+        #     TokenPairFilteringWinners(),
+        #     BatchSecondPriceReward(12 * 10**15, 10**16),
+        # ),
+        FilterRankRewardMechanism(
+            NoFilter(),
+            SubsetFilteringWinners(
+                filtering_function=TradedTokens(), cumulative_filtering=True
+            ),
+            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+        ),
+        # FilterRankRewardMechanism(
+        #     BaselineFilter(),
+        #     TokenPairFilteringWinners(),
+        #     TokenPairImprovementReward(12 * 10**15, 10**16, True),
+        # ),
+        # FilterRankRewardMechanism(
+        #     BaselineFilter(),
+        #     TokenPairFilteringWinners(),
+        #     TokenPairImprovementReward(12 * 10**15, 10**16, False),
+        # ),
+    ]
+    all_rewards: list[list[dict[str, tuple[int, int]]]] = []
     for solutions in solutions_batch:
         print(solutions)
-        for mechanism in [
-            FilterRankRewardMechanism(
-                NoFilter(),
-                SingleWinner(),
-                BatchSecondPriceReward(12 * 10**15, 10**16),
-            ),
-            # FilterRankRewardMechanism(
-            #     NoFilter(),
-            #     TokenPairFilteringWinners(),
-            #     BatchSecondPriceReward(12 * 10**15, 10**16),
-            # ),
-            FilterRankRewardMechanism(
-                NoFilter(),
-                SubsetFilteringWinners(
-                    filtering_function=TradedTokens(), cumulative_filtering=True
-                ),
-                BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
-            ),
-            # FilterRankRewardMechanism(
-            #     BaselineFilter(),
-            #     TokenPairFilteringWinners(),
-            #     TokenPairImprovementReward(12 * 10**15, 10**16, True),
-            # ),
-            # FilterRankRewardMechanism(
-            #     BaselineFilter(),
-            #     TokenPairFilteringWinners(),
-            #     TokenPairImprovementReward(12 * 10**15, 10**16, False),
-            # ),
-        ]:
-            rewards = mechanism.winners_and_rewards(solutions)
-            print(rewards)
-            print(
-                "total surplus: "
-                f"{sum(solution.score for solution in solutions if solution.id in rewards)}"
-            )
 
-    # filtered_solutions = mechanism.solution_filter.filter(solutions)
-    # winners = mechanism.winner_selection.select_winners(filtered_solutions)
-    # rewards = mechanism.reward_mechanism.compute_rewards(winners, filtered_solutions)
-    # print(
-    #     "total surplus: "
-    #     f"{sum(solution.score for solution in solutions if solution.id in rewards)}"
-    # )
+        rewards = [mechanism.winners_and_rewards(solutions) for mechanism in mechanisms]
+        print(rewards)
+
+        all_rewards.append(rewards)
+
+    print(all_rewards)
+
