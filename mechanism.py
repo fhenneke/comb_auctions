@@ -345,3 +345,49 @@ class FilterRankRewardMechanism(AuctionMechanism):
         winners = self.winner_selection.select_winners(filtered_solutions)
         rewards = self.reward_mechanism.compute_rewards(winners, filtered_solutions)
         return rewards
+
+
+@dataclass(frozen=True)
+class VCGRewardMechanism(AuctionMechanism):
+    solution_filter: AbstractFilter
+    winner_selection: WinnerSelection
+
+    def winners_and_rewards(
+        self, solutions: list[Solution]
+    ) -> dict[str, tuple[int, int]]:
+        remaining_solutions = self.solution_filter.filter(solutions)
+        winners = self.winner_selection.select_winners(remaining_solutions)
+        rewards = self.compute_vcg_rewards(winners, remaining_solutions)
+        while any(reward[0] < 0 for reward in rewards.values()):
+            # remove all winners who would have received a negative score
+            remaining_solutions = [
+                solution
+                for solution in remaining_solutions
+                if (solution not in winners) or (rewards[solution.id][0] > 0)
+            ]
+            winners = self.winner_selection.select_winners(remaining_solutions)
+            rewards = self.compute_vcg_rewards(winners, remaining_solutions)
+        return rewards
+
+    def compute_total_score(self, winners: list[Solution]) -> int:
+        return sum(winner.score for winner in winners)
+
+    def compute_vcg_rewards(
+        self, winners: list[Solution], solutions: list[Solution]
+    ) -> dict[str, tuple[int, int]]:
+        rewards: dict[str, tuple[int, int]] = {}
+        total_score = self.compute_total_score(winners)
+        for winner in winners:
+            remaining_solutions = (
+                [  # we might need to exclude other solutions by winning solver as well
+                    solution for solution in solutions if solution != winner
+                ]
+            )
+            new_winners = self.winner_selection.select_winners(remaining_solutions)
+            reference_score = self.compute_total_score(new_winners)
+            rewards[winner.id] = (
+                total_score - reference_score,
+                (total_score - reference_score) - winner.score,
+            )
+
+        return rewards

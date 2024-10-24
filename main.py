@@ -5,6 +5,7 @@ from mechanism import (
     Trade,
     Solution,
     FilterRankRewardMechanism,
+    VCGRewardMechanism,
     NoFilter,
     BaselineFilter,
     TokenPairs,
@@ -220,26 +221,32 @@ if __name__ == "__main__":
             ),
             BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
         ),
-        FilterRankRewardMechanism(
+        # FilterRankRewardMechanism(
+        #     NoFilter(),
+        #     SubsetFilteringWinners(
+        #         filtering_function=TradedTokens(), cumulative_filtering=False
+        #     ),
+        #     BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+        # ),
+        # FilterRankRewardMechanism(
+        #     NoFilter(),
+        #     SubsetFilteringWinners(
+        #         filtering_function=TokenPairs(), cumulative_filtering=True
+        #     ),
+        #     BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+        # ),
+        # FilterRankRewardMechanism(
+        #     NoFilter(),
+        #     SubsetFilteringWinners(
+        #         filtering_function=TokenPairs(), cumulative_filtering=False
+        #     ),
+        #     BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+        # ),
+        VCGRewardMechanism(
             NoFilter(),
             SubsetFilteringWinners(
-                filtering_function=TradedTokens(), cumulative_filtering=False
+                filtering_function=TradedTokens(), cumulative_filtering=True
             ),
-            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
-        ),
-        FilterRankRewardMechanism(
-            NoFilter(),
-            SubsetFilteringWinners(
-                filtering_function=TokenPairs(), cumulative_filtering=True
-            ),
-            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
-        ),
-        FilterRankRewardMechanism(
-            NoFilter(),
-            SubsetFilteringWinners(
-                filtering_function=TokenPairs(), cumulative_filtering=False
-            ),
-            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
         ),
     ]
     all_rewards: list[list[dict[str, tuple[int, int]]]] = []
