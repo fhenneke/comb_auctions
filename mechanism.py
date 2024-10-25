@@ -16,7 +16,7 @@ class Solution:
     solver: str
     score: int
     trades: list[Trade]
-    # scores: dict[tuple[str, str], int]
+
 
 def compute_total_score(solutions: list[Solution]) -> int:
     return sum(solution.score for solution in solutions)
