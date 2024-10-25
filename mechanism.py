@@ -18,6 +18,9 @@ class Solution:
     trades: list[Trade]
     # scores: dict[tuple[str, str], int]
 
+def compute_total_score(solutions: list[Solution]) -> int:
+    return sum(solution.score for solution in solutions)
+
 
 def aggregate_scores(solution: Solution) -> dict[tuple[str, str], int]:
     scores: dict[tuple[str, str], int] = {}
@@ -371,14 +374,11 @@ class VCGRewardMechanism(AuctionMechanism):
             rewards = self.compute_vcg_rewards(winners, remaining_solutions)
         return rewards
 
-    def compute_total_score(self, winners: list[Solution]) -> int:
-        return sum(winner.score for winner in winners)
-
     def compute_vcg_rewards(
         self, winners: list[Solution], solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
         rewards: dict[str, tuple[int, int]] = {}
-        total_score = self.compute_total_score(winners)
+        total_score = compute_total_score(winners)
         for winner in winners:
             remaining_solutions = (
                 [  # we might need to exclude other solutions by winning solver as well
@@ -386,7 +386,7 @@ class VCGRewardMechanism(AuctionMechanism):
                 ]
             )
             new_winners = self.winner_selection.select_winners(remaining_solutions)
-            reference_score = self.compute_total_score(new_winners)
+            reference_score = compute_total_score(new_winners)
             rewards[winner.id] = (
                 min(total_score - reference_score, self.upper_cap),
                 max((total_score - reference_score) - winner.score, -self.lower_cap),
