@@ -90,13 +90,13 @@ class DirectedTokenPairOverlapFilter(AbstractFilter):
         return filtered_solutions
 
 
+@dataclass(frozen=True)
 class SolverFilter(AbstractFilter):
-    def __init__(self, solver: str):
-        self._solver = solver
+    solver: str
 
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         filtered_solutions = [
-            solution for solution in solutions if solution.solver != self._solver
+            solution for solution in solutions if solution.solver != self.solver
         ]
         return filtered_solutions
 
@@ -205,10 +205,10 @@ class NoReward(RewardMechanism):
         return {winner.id: (0, 0) for winner in winners}
 
 
+@dataclass(frozen=True)
 class BatchSecondPriceReward(RewardMechanism):
-    def __init__(self, upper_cap: int, lower_cap: int) -> None:
-        self.upper_cap = upper_cap
-        self.lower_cap = lower_cap
+    upper_cap: int
+    lower_cap: int
 
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
@@ -240,7 +240,7 @@ class BatchSecondPriceReward(RewardMechanism):
         return rewards
 
 
-@dataclass
+@dataclass(frozen=True)
 class BatchOverlapSecondPriceReward(RewardMechanism):
     upper_cap: int
     lower_cap: int
@@ -281,13 +281,11 @@ class BatchOverlapSecondPriceReward(RewardMechanism):
         return rewards
 
 
+@dataclass(frozen=True)
 class TokenPairImprovementReward(RewardMechanism):
-    def __init__(
-        self, upper_cap: int, lower_cap: int, only_baseline: bool = True
-    ) -> None:
-        self.upper_cap = upper_cap
-        self.lower_cap = lower_cap
-        self.only_baseline = only_baseline
+    upper_cap: int
+    lower_cap: int
+    only_baseline: bool
 
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
@@ -335,11 +333,11 @@ class AuctionMechanism(ABC):
         """Select winners and compute their rewards"""
 
 
+@dataclass(frozen=True)
 class FilterRankRewardMechanism(AuctionMechanism):
-    def __init__(self, solution_filter, winner_selection, reward_mechanism):
-        self.solution_filter = solution_filter
-        self.winner_selection = winner_selection
-        self.reward_mechanism = reward_mechanism
+    solution_filter: AbstractFilter
+    winner_selection: WinnerSelection
+    reward_mechanism: RewardMechanism
 
     def winners_and_rewards(
         self, solutions: list[Solution]
