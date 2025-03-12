@@ -10,12 +10,14 @@ from mechanism import (
     BaselineFilter,
     TokenPairs,
     TradedTokens,
-    SingleWinner,
-    TokenPairFilteringWinners,
-    SubsetFilteringWinners,
+    DirectSelection,
+    MonotoneSelection,
+    NoReward,
+    SubsetFilteringSelection,
     BatchSecondPriceReward,
     BatchOverlapSecondPriceReward,
     TokenPairImprovementReward,
+    SingleSurplusSelection,
 )
 
 
@@ -236,49 +238,49 @@ if __name__ == "__main__":
     #         efficiency_loss=0.01,
     #     )
     # ]
-    solutions_batch = fetch_solutions_batch(9499893, 9532691)
+    # solutions_batch = fetch_solutions_batch(9499893, 9532691)
 
     mechanisms = [
         FilterRankRewardMechanism(
             NoFilter(),
-            SingleWinner(),
-            BatchSecondPriceReward(12 * 10**15, 10**16),
+            DirectSelection(SingleSurplusSelection()),
+            NoReward(),
         ),
         FilterRankRewardMechanism(
             NoFilter(),
-            SubsetFilteringWinners(
-                filtering_function=TradedTokens(), cumulative_filtering=True
+            DirectSelection(
+                SubsetFilteringSelection(
+                    filtering_function=TradedTokens(), cumulative_filtering=True
+                )
             ),
-            BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
+            NoReward(),
         ),
-        # FilterRankRewardMechanism(
-        #     NoFilter(),
-        #     SubsetFilteringWinners(
-        #         filtering_function=TradedTokens(), cumulative_filtering=False
-        #     ),
-        #     BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
-        # ),
-        # FilterRankRewardMechanism(
-        #     NoFilter(),
-        #     SubsetFilteringWinners(
-        #         filtering_function=TokenPairs(), cumulative_filtering=True
-        #     ),
-        #     BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
-        # ),
-        # FilterRankRewardMechanism(
-        #     NoFilter(),
-        #     SubsetFilteringWinners(
-        #         filtering_function=TokenPairs(), cumulative_filtering=False
-        #     ),
-        #     BatchOverlapSecondPriceReward(12 * 10**15, 10**16, TradedTokens()),
-        # ),
-        VCGRewardMechanism(
-            NoFilter(),
-            SubsetFilteringWinners(
-                filtering_function=TradedTokens(), cumulative_filtering=True
+        FilterRankRewardMechanism(
+            BaselineFilter(),
+            DirectSelection(
+                SubsetFilteringSelection(
+                    filtering_function=TradedTokens(), cumulative_filtering=True
+                )
             ),
-            12 * 10**15,
-            10**16,
+            NoReward(),
+        ),
+        FilterRankRewardMechanism(
+            NoFilter(),
+            MonotoneSelection(
+                SubsetFilteringSelection(
+                    filtering_function=TradedTokens(), cumulative_filtering=True
+                )
+            ),
+            NoReward(),
+        ),
+        FilterRankRewardMechanism(
+            BaselineFilter(),
+            MonotoneSelection(
+                SubsetFilteringSelection(
+                    filtering_function=TradedTokens(), cumulative_filtering=True
+                )
+            ),
+            NoReward(),
         ),
     ]
     all_rewards: list[list[dict[str, tuple[int, int]]]] = []
@@ -290,4 +292,4 @@ if __name__ == "__main__":
 
         all_rewards.append(rewards)
 
-    compute_reward_statistic(solutions_batch, all_rewards)
+    # compute_reward_statistic(solutions_batch, all_rewards)

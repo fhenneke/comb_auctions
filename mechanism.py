@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import FrozenSet
 
 
 @dataclass(frozen=True)
@@ -65,18 +66,18 @@ def compute_reference_solutions(
     return reference_solutions
 
 
-class AbstractFilter(ABC):
+class SolutionFilter(ABC):
     @abstractmethod
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         """Filter solutions"""
 
 
-class NoFilter(AbstractFilter):
+class NoFilter(SolutionFilter):
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         return list(solutions)
 
 
-class DirectedTokenPairOverlapFilter(AbstractFilter):
+class DirectedTokenPairOverlapFilter(SolutionFilter):
     def __init__(self, solution: Solution):
         self.aggregated_scores = aggregate_scores(solution)
 
@@ -91,7 +92,7 @@ class DirectedTokenPairOverlapFilter(AbstractFilter):
 
 
 @dataclass(frozen=True)
-class SolverFilter(AbstractFilter):
+class SolverFilter(SolutionFilter):
     solver: str
 
     def filter(self, solutions: list[Solution]) -> list[Solution]:
@@ -101,7 +102,21 @@ class SolverFilter(AbstractFilter):
         return filtered_solutions
 
 
-class BaselineFilter(AbstractFilter):
+@dataclass(frozen=True)
+class SolverFilterBatches(SolutionFilter):
+    solver: str
+
+    def filter(self, solutions: list[Solution]) -> list[Solution]:
+        filtered_solutions = [
+            solution
+            for solution in solutions
+            if solution.solver != self.solver or len(aggregate_scores(solution)) == 1
+        ]
+        return filtered_solutions
+
+
+@dataclass(frozen=True)
+class BaselineFilter(SolutionFilter):
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         filtered_solutions = []
         baseline_solutions = compute_reference_solutions(solutions)
@@ -110,7 +125,13 @@ class BaselineFilter(AbstractFilter):
             if len(aggregated_scores) == 1 or all(
                 score
                 >= (
-                    baseline_solutions[token_pair][0].score
+                    sum(
+                        (
+                            trade.score if trade.score is not None else 0
+                            for trade in baseline_solutions[token_pair][0].trades
+                        ),
+                        0,
+                    )
                     if token_pair in baseline_solutions
                     else 0
                 )
@@ -120,44 +141,22 @@ class BaselineFilter(AbstractFilter):
         return filtered_solutions
 
 
-class WinnerSelection(ABC):
-    @abstractmethod
-    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
-        """Select winners"""
-
-
-class SingleWinner(WinnerSelection):
-    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
-        return [sorted(solutions, key=lambda solution: solution.score)[-1]]
-
-
-class TokenPairFilteringWinners(WinnerSelection):
-    single_winner_mechanism = SingleWinner()
-
-    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
-        winners: list[Solution] = []
-        remaining_solutions = list(solutions)
-        while remaining_solutions:
-            new_winner = self.single_winner_mechanism.select_winners(
-                remaining_solutions
-            )[0]
-            winners.append(new_winner)
-            remaining_solutions = DirectedTokenPairOverlapFilter(new_winner).filter(
-                remaining_solutions
-            )
-
-        return winners
-
-
 class FilterProperty(ABC):
     @abstractmethod
     def get_filter_set(self, solution: Solution) -> set:
         pass
 
 
-class TokenPairs(FilterProperty):
+class DirectedTokenPairs(FilterProperty):
     def get_filter_set(self, solution: Solution) -> set:
         return {(trade.sell_token, trade.buy_token) for trade in solution.trades}
+
+
+class TokenPairs(FilterProperty):
+    def get_filter_set(self, solution: Solution) -> set:
+        return {
+            frozenset((trade.sell_token, trade.buy_token)) for trade in solution.trades
+        }
 
 
 class TradedTokens(FilterProperty):
@@ -167,27 +166,89 @@ class TradedTokens(FilterProperty):
         return sell_tokens.union(buy_tokens)
 
 
+class SolutionSelection(ABC):
+    @abstractmethod
+    def select_solutions(self, solutions: list[Solution]) -> list[Solution]:
+        """Select solutions from a list of solutions.
+
+        Solutions selected should be executable at the same time.
+        """
+
+
+class SingleSurplusSelection(SolutionSelection):
+    def select_solutions(self, solutions: list[Solution]) -> list[Solution]:
+        return [sorted(solutions, key=lambda solution: solution.score)[-1]]
+
+
 @dataclass(frozen=True)
-class SubsetFilteringWinners(WinnerSelection):
+class SubsetFilteringSelection(SolutionSelection):
     cumulative_filtering: bool = True
     filtering_function: FilterProperty = TradedTokens()
 
-    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
+    def select_solutions(self, solutions: list[Solution]) -> list[Solution]:
         sorted_solutions = sorted(
             solutions, key=lambda _solution: _solution.score, reverse=True
         )
-        winners: list[Solution] = []
+        selection: list[Solution] = []
         filter_set: set[str] = set()
         for solution in sorted_solutions:
             solution_filter_set = self.filtering_function.get_filter_set(solution)
             if len(solution_filter_set & filter_set) == 0:
-                winners.append(solution)
-                if not self.cumulative_filtering:
+                selection.append(solution)
+                if (
+                    not self.cumulative_filtering
+                ):  # if not cumulative, only filter for selection
                     filter_set = filter_set.union(solution_filter_set)
-            if self.cumulative_filtering:
+            if self.cumulative_filtering:  # if cumulative, always filter
                 filter_set = filter_set.union(solution_filter_set)
 
-        return winners
+        return selection
+
+
+class WinnerSelection(ABC):
+    @abstractmethod
+    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
+        """Select winners"""
+
+
+@dataclass(frozen=True)
+class DirectSelection(WinnerSelection):
+    selection_rule: SolutionSelection
+
+    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
+        return self.selection_rule.select_solutions(solutions)
+
+
+@dataclass(frozen=True)
+class MonotoneSelection(WinnerSelection):
+    selection_rule: SolutionSelection
+
+    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
+        return self.winners_and_reference_scores(solutions)[0]
+
+    def winners_and_reference_scores(
+        self, solutions: list[Solution]
+    ) -> tuple[list[Solution], dict[str, int]]:
+        selection = self.selection_rule.select_solutions(solutions)
+        score = compute_total_score(selection)
+        solvers = list({solution.solver for solution in selection})
+        reference_scores: dict[str, int] = {}
+        for solver in solvers:
+            filtered_solutions = SolverFilter(solver).filter(solutions)
+            filtered_selection = self.selection_rule.select_solutions(
+                filtered_solutions
+            )
+            filtered_score = compute_total_score(filtered_selection)
+            reference_scores[solver] = filtered_score
+        solver_max = max(reference_scores, key=reference_scores.get)
+
+        if reference_scores[solver_max] > score:
+            return self.winners_and_reference_scores(
+                # SolverFilterBatches(solver_max).filter(solutions)
+                SolverFilter(solver_max).filter(solutions)
+            )
+
+        return selection, reference_scores
 
 
 class RewardMechanism(ABC):
@@ -335,7 +396,7 @@ class AuctionMechanism(ABC):
 
 @dataclass(frozen=True)
 class FilterRankRewardMechanism(AuctionMechanism):
-    solution_filter: AbstractFilter
+    solution_filter: SolutionFilter
     winner_selection: WinnerSelection
     reward_mechanism: RewardMechanism
 
@@ -350,7 +411,7 @@ class FilterRankRewardMechanism(AuctionMechanism):
 
 @dataclass(frozen=True)
 class VCGRewardMechanism(AuctionMechanism):
-    solution_filter: AbstractFilter
+    solution_filter: SolutionFilter
     winner_selection: WinnerSelection
     upper_cap: int
     lower_cap: int

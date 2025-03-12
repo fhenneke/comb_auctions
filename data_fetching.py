@@ -154,14 +154,56 @@ def get_solution_data_single(
 
 
 def get_solution_data_batch(
-    competition_data_batch: list[dict[str, Any]], order_data: dict[str, dict[str, Any]]
+    competition_data_batch: list[dict[str, Any]],
+    order_data: dict[str, dict[str, Any]],
+    split: bool = False,
+    efficiency_loss: float = 0.0,
 ) -> list[list[Solution]]:
     solutions_batch: list[list[Solution]] = []
     for competition_data in competition_data_batch:
         solutions = get_solution_data_single(competition_data, order_data)
+        if split:
+            solutions = compute_split_solutions(solutions, efficiency_loss)
+
         solutions_batch.append(solutions)
 
     return solutions_batch
+
+
+def compute_split_solutions(
+    solutions: list[Solution], efficiency_loss: float = 0.0
+) -> list[Solution]:
+    split_solutions: list[Solution] = []
+    for solution in solutions:
+        split_solutions += compute_split_solution(solution, efficiency_loss)
+    return split_solutions
+
+
+def compute_split_solution(solution: Solution, efficiency_loss: float = 0.0):
+    split_solution: list[Solution] = [solution]
+    scores = aggregate_scores(solution)
+    # make the following its own function
+    if len(scores) > 1:
+        for token_pair in scores:
+            solution_id = solution.id + "-" + str(token_pair)
+            solver = solution.solver
+            trades = [
+                trade
+                for trade in solution.trades
+                if (trade.sell_token, trade.buy_token) == token_pair
+            ]
+
+            assert all(
+                trade.score is not None for trade in trades
+            ), f"score not set for all trades: {trades}"
+            score = sum(
+                round((1 - efficiency_loss) * trade.score)
+                for trade in trades
+                if trade.score is not None
+            )
+
+            split_solution.append(Solution(solution_id, solver, score, trades))
+    return split_solution
 
 
 def compute_surplus(order, order_execution, native_prices) -> int:
