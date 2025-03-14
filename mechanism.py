@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import FrozenSet
 
 
 @dataclass(frozen=True)
@@ -19,6 +18,10 @@ class Solution:
     trades: list[Trade]
 
 
+def get_orders(solutions: list[Solution]):
+    return {trade.id for solution in solutions for trade in solution.trades}
+
+
 def compute_total_score(solutions: list[Solution]) -> int:
     return sum(solution.score for solution in solutions)
 
@@ -33,7 +36,7 @@ def aggregate_scores(solution: Solution) -> dict[tuple[str, str], int]:
     return scores
 
 
-def compute_reference_solutions(
+def compute_baseline_solutions(
     solutions: list[Solution], only_baseline: bool = True
 ) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
     reference_solutions: dict[tuple[str, str], tuple[Solution, Solution | None]] = {}
@@ -119,7 +122,7 @@ class SolverFilterBatches(SolutionFilter):
 class BaselineFilter(SolutionFilter):
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         filtered_solutions = []
-        baseline_solutions = compute_reference_solutions(solutions)
+        baseline_solutions = compute_baseline_solutions(solutions)
         for solution in solutions:
             aggregated_scores = aggregate_scores(solution)
             if len(aggregated_scores) == 1 or all(
@@ -267,7 +270,8 @@ class NoReward(RewardMechanism):
 
 
 @dataclass(frozen=True)
-class BatchSecondPriceReward(RewardMechanism):
+class ReferenceReward(RewardMechanism):
+    winner_selection: WinnerSelection
     upper_cap: int
     lower_cap: int
 
@@ -275,27 +279,20 @@ class BatchSecondPriceReward(RewardMechanism):
         self, winners: list[Solution], solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
         rewards: dict[str, tuple[int, int]] = {}
-        remaining_winners = list(winners)
-        remaining_solutions = list(solutions)
-        while remaining_winners:
-            winner = SingleWinner().select_winners(remaining_winners)[0]
-            reference_solutions = SolverFilter(winner.solver).filter(
-                remaining_solutions
-            )
-            reference_score = 0
-            if reference_solutions:
-                reference_score = (
-                    SingleWinner().select_winners(reference_solutions)[0].score
+        winning_solvers = {winner.solver for winner in winners}
+        score = compute_total_score(winners)
+        for solver in winning_solvers:
+            filtered_solutions = SolverFilter(solver).filter(solutions)
+            if filtered_solutions:
+                reference_winners = self.winner_selection.select_winners(
+                    filtered_solutions
                 )
-
-            rewards[winner.id] = (
-                min(winner.score - reference_score, self.upper_cap),
+                reference_score = min(score, compute_total_score(reference_winners))
+            else:
+                reference_score = 0
+            rewards[solver] = (
+                min(score - reference_score, self.upper_cap),
                 -min(reference_score, self.lower_cap),
-            )
-
-            remaining_winners.remove(winner)
-            remaining_solutions = DirectedTokenPairOverlapFilter(winner).filter(
-                remaining_solutions
             )
 
         return rewards
@@ -352,7 +349,7 @@ class TokenPairImprovementReward(RewardMechanism):
         self, winners: list[Solution], solutions: list[Solution]
     ) -> dict[str, tuple[int, int]]:
         rewards: dict[str, tuple[int, int]] = {}
-        reference_scores = compute_reference_solutions(
+        reference_scores = compute_baseline_solutions(
             solutions, only_baseline=self.only_baseline
         )
         for winner in winners:
@@ -390,7 +387,7 @@ class AuctionMechanism(ABC):
     @abstractmethod
     def winners_and_rewards(
         self, solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
+    ) -> tuple[list[Solution], dict[str, tuple[int, int]]]:
         """Select winners and compute their rewards"""
 
 
@@ -402,53 +399,8 @@ class FilterRankRewardMechanism(AuctionMechanism):
 
     def winners_and_rewards(
         self, solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
+    ) -> tuple[list[Solution], dict[str, tuple[int, int]]]:
         filtered_solutions = self.solution_filter.filter(solutions)
         winners = self.winner_selection.select_winners(filtered_solutions)
         rewards = self.reward_mechanism.compute_rewards(winners, filtered_solutions)
-        return rewards
-
-
-@dataclass(frozen=True)
-class VCGRewardMechanism(AuctionMechanism):
-    solution_filter: SolutionFilter
-    winner_selection: WinnerSelection
-    upper_cap: int
-    lower_cap: int
-
-    def winners_and_rewards(
-        self, solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        remaining_solutions = self.solution_filter.filter(solutions)
-        winners = self.winner_selection.select_winners(remaining_solutions)
-        rewards = self.compute_vcg_rewards(winners, remaining_solutions)
-        while any(reward[0] < 0 for reward in rewards.values()):
-            # remove all winners who would have received a negative score
-            remaining_solutions = [
-                solution
-                for solution in remaining_solutions
-                if (solution not in winners) or (rewards[solution.id][0] > 0)
-            ]
-            winners = self.winner_selection.select_winners(remaining_solutions)
-            rewards = self.compute_vcg_rewards(winners, remaining_solutions)
-        return rewards
-
-    def compute_vcg_rewards(
-        self, winners: list[Solution], solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        rewards: dict[str, tuple[int, int]] = {}
-        total_score = compute_total_score(winners)
-        for winner in winners:
-            remaining_solutions = (
-                [  # we might need to exclude other solutions by winning solver as well
-                    solution for solution in solutions if solution != winner
-                ]
-            )
-            new_winners = self.winner_selection.select_winners(remaining_solutions)
-            reference_score = compute_total_score(new_winners)
-            rewards[winner.id] = (
-                min(total_score - reference_score, self.upper_cap),
-                max((total_score - reference_score) - winner.score, -self.lower_cap),
-            )
-
-        return rewards
+        return winners, rewards
