@@ -1,9 +1,0 @@
-black
-pylint
-mypy
-
-python-dotenv
-requests
-types-requests
-SQLAlchemy
-psycopg[binary]
