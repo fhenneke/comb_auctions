@@ -7,7 +7,7 @@ class Trade:
     id: str
     sell_token: str
     buy_token: str
-    score: int | None = None
+    score: int
 
 
 @dataclass(frozen=True)
