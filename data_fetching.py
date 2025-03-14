@@ -211,7 +211,7 @@ def compute_surplus(order, order_execution, native_prices) -> int:
     limit_buy = int(order["buyAmount"])
     executed_sell = int(order_execution["sellAmount"])
     executed_buy = int(order_execution["buyAmount"])
-    sell_price = Fraction(int(native_prices[order["buyToken"]]), 10**18)
+    sell_price = Fraction(int(native_prices[order["sellToken"]]), 10**18)
     buy_price = Fraction(int(native_prices[order["buyToken"]]), 10**18)
     if order["kind"] == "sell":
         partial_limit_buy = math.ceil(Fraction(limit_buy * executed_sell, limit_sell))
