@@ -128,7 +128,6 @@ def get_solution_data_single(
     solutions = []
     for solution_id, solution in enumerate(solution_data):
         solver = solution["solverAddress"]
-        score = int(solution["score"])
         trades: list[Trade] = []
         for order_execution in solution["orders"]:
             order_id: str = order_execution["id"]
@@ -141,6 +140,9 @@ def get_solution_data_single(
             surplus = compute_surplus(order, order_execution, native_prices)
 
             trades.append(Trade(order_id, sell_token, buy_token, surplus))
+
+        # use sum of trade scores instead of int(solution["score"])
+        score = sum(trade.score for trade in trades)
 
         solution_obj = Solution(
             id=str(solution_id) + "-" + solution["solver"],
