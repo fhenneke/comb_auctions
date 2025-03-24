@@ -1,7 +1,8 @@
 """Functionality for fetching solutions data from the competition endpoint."""
 import itertools
-from fractions import Fraction
 import math
+import pickle
+from fractions import Fraction
 from os import getenv
 from typing import Any, Literal
 
@@ -21,7 +22,7 @@ database_urls = {
 }
 
 
-def fetch_solutions_batch(start_id: int, end_id: int) -> list[list[Solution]]:
+def fetch_auctions_from_db(start_id: int, end_id: int) -> list[list[Solution]]:
     engine = create_engine("postgresql+psycopg://" + database_urls["prod"], echo=True)
 
     query = text(f"""with trade_data as (select ps.*,
@@ -114,6 +115,17 @@ from trade_data_with_prices""")
     return solutions_batch
 
 
+def fetch_auctions(auction_start, auction_end):
+    try:
+        with open(f"batches_{auction_start}_{auction_end}.pickle", 'rb') as handle:
+            solutions_batch = pickle.load(handle)
+    except FileNotFoundError:
+        solutions_batch = fetch_auctions_from_db(auction_start, auction_end)
+        with open(f"batches_{auction_start}_{auction_end}.pickle", "wb") as handle:
+            pickle.dump(solutions_batch, handle, protocol=-1)
+    return solutions_batch
+
+
 def compute_surplus(trade_data) -> int:
     limit_sell = int(trade_data["limit_sell_amount"])
     limit_buy = int(trade_data["limit_buy_amount"])
@@ -201,5 +213,5 @@ def compute_split_solution(solution: Solution, efficiency_loss: float = 0.0,
 
 
 if __name__ == "__main__":
-    solutions = fetch_solutions_batch(10322553 - 10, 10322553)
+    solutions = fetch_auctions(10322553 - 10, 10322553)
     print(solutions)
