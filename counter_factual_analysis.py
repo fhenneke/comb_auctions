@@ -1,3 +1,5 @@
+import argparse
+
 from data_fetching import fetch_auctions, compute_split_solutions
 from mechanism import (
     Solution,
@@ -118,14 +120,32 @@ def remove_order_from_solution(solution: Solution, order_uids: set[str]):
 
 
 def main():
+    """Main function to run the counterfactual analysis."""
+    parser = argparse.ArgumentParser(
+        description="Run counterfactual analysis on auction solutions.")
+    parser.add_argument("--auction_start", type=int, default=10322553 - 50000,
+                        help="Start block for fetching auctions (default: 10322553 - 50000)")
+    parser.add_argument("--auction_end", type=int, default=10322553,
+                        help="End block for fetching auctions (default: 10322553)")
+    parser.add_argument("--efficiency_loss", type=float, default=0.01,
+                        help="Efficiency loss parameter (default: 0.01)")
+    parser.add_argument("--approach", type=str, default="complete",
+                        help="Approach type for solution splitting (default: complete)")
+    parser.add_argument("--reward_upper_cap", type=int, default=12 * 10 ** 15,
+                        help="Upper cap for rewards in wei (default: 12 * 10^15)")
+    parser.add_argument("--reward_lower_cap", type=int, default=10 ** 16,
+                        help="Lower cap for rewards in wei (default: 10^16)")
+
+    args = parser.parse_args()
+
     # fetch auctions and split
     # this can take around 1 minute the first time it is run and creates a file of 80MB
-    auction_start = 10322553 - 50000
-    auction_end = 10322553
+    auction_start = args.auction_start
+    auction_end = args.auction_end
     print(f"Fetching auctions from {auction_start} to {auction_end}...")
     solutions_batch = fetch_auctions(auction_start, auction_end)
-    efficiency_loss = 0.01
-    approach = "complete"
+    efficiency_loss = args.efficiency_loss
+    approach = args.approach
     print(
         f"Splitting solutions with efficiency loss {efficiency_loss} "
         f"and approach \"{approach}\"..."
@@ -139,8 +159,8 @@ def main():
     # 1. current, single winner
     # 2. currently implemented multiple winners, with less restrictive filtering
     # 3. slightly more sophisticated selection of multiple winners
-    reward_cap_upper = 12 * 10 ** 15
-    reward_cap_lower = 10 ** 16
+    reward_cap_upper = args.reward_upper_cap
+    reward_cap_lower = args.reward_lower_cap
     print(f"Using reward caps of {reward_cap_upper / 10 ** 18} and {reward_cap_lower / 10 ** 18}")
 
     mechanisms = [
