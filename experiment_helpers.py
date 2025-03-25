@@ -5,54 +5,50 @@ from mechanism import AuctionMechanism, Solution, get_orders
 
 def run_counter_factual_analysis(
     auction_solutions_list: list[list[Solution]],
-    mechanisms: list[AuctionMechanism],
+    mechanism: AuctionMechanism,
     remove_executed_orders: bool = True,
-) -> list[list[tuple[list[Solution], dict[str, tuple[int, int]]]]]:
-    """Evaluates counter-factual analysis on given solutions and auction mechanisms.
+) -> list[tuple[list[Solution], dict[str, tuple[int, int]]]]:
+    """Run a counterfactual analysis based on auction solutions.
 
-    This function processes batches of solutions and applies a list of auction
-    mechanisms to determine the winners and their rewards. Optionally, it can filter
-    executed orders to prevent them from being considered in subsequent auctions,
-    ensuring that already settled orders are excluded from analysis.
+    This function iterates through a list of auction solutions, evaluates the
+    winners and their rewards using a specified auction mechanism, and optionally
+    removes orders already executed. The results are aggregated for further
+    analysis.
 
     Parameters
     ----------
     auction_solutions_list : list[list[Solution]]
-        A batch of solution sets, where each solution represents bid allocations
-        and other data related to an auction outcome.
-    mechanisms : list[AuctionMechanism]
-        A list of auction mechanisms to be applied to the solutions. Each mechanism
-        provides methods for determining winners and their associated rewards.
-    remove_executed_orders : bool, optional, default=True
-        If True, removes already settled orders from consideration within each
-        batch of solutions.
+        A list of auction solutions where each solution represents a possible
+        outcome in the auction.
+    mechanism : AuctionMechanism
+        The auction mechanism used to determine the winners and their rewards
+        based on the provided solutions.
+    remove_executed_orders : bool, optional
+        If True, excludes already-settled orders from the analysis. Defaults to
+        True.
 
     Returns
     -------
-    list[list[tuple[list[Solution], dict[str, tuple[int, int]]]]]
-        A nested list structure, where each outer level corresponds to a mechanism,
-        and for each mechanism, the inner list contains tuples of:
-        - A list of winners.
-        - A dictionary mapping solvers to rewards and penalties.
+    list[tuple[list[Solution], dict[str, tuple[int, int]]]]
+        A list of tuples, where each tuple corresponds to the winners and their
+        rewards for the respective solutions in the input list. Each tuple contains
+        a list of winners and a dictionary mapping solvers to their rewards.
     """
     all_winners_rewards = []
-    for mechanism in mechanisms:
-        order_uids_settled: set[str] = set()
-        all_winners_rewards_for_mechanism = []
-        for solutions in auction_solutions_list:
-            # filter orders which are already settled
-            if remove_executed_orders:
-                solutions_filtered = [
-                    remove_order_from_solution(solution, order_uids_settled)
-                    for solution in solutions
-                ]
-            else:
-                solutions_filtered = list(solutions)
-            winners_rewards = mechanism.winners_and_rewards(solutions_filtered)
-            winners, _ = winners_rewards
-            all_winners_rewards_for_mechanism.append(winners_rewards)
-            order_uids_settled.update(get_orders(winners))
-        all_winners_rewards.append(all_winners_rewards_for_mechanism)
+    order_uids_settled: set[str] = set()
+    for solutions in auction_solutions_list:
+        # filter orders which are already settled
+        if remove_executed_orders:
+            solutions_filtered = [
+                remove_order_from_solution(solution, order_uids_settled)
+                for solution in solutions
+            ]
+        else:
+            solutions_filtered = list(solutions)
+        winners_rewards = mechanism.winners_and_rewards(solutions_filtered)
+        winners, _ = winners_rewards
+        all_winners_rewards.append(winners_rewards)
+        order_uids_settled.update(get_orders(winners))
     return all_winners_rewards
 
 

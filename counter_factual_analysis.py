@@ -130,11 +130,12 @@ def main():
     ]
 
     print("Running counterfactual analysis...")
-    all_winners_results = run_counter_factual_analysis(
-        solutions_batch_split, mechanisms
-    )
+    all_winners_rewards = [
+        run_counter_factual_analysis(solutions_batch_split, mechanism)
+        for mechanism in mechanisms
+    ]
 
-    compute_statistics(solutions_batch_split, all_winners_results)
+    compute_statistics(solutions_batch_split, all_winners_rewards)
 
 
 if __name__ == "__main__":
