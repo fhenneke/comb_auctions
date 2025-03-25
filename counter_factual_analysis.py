@@ -8,11 +8,12 @@ from mechanism import (
     BaselineFilter,
     DirectedTokenPairs,
     DirectSelection,
-    MonotoneSelection,
+    FullCombinatorialSelection,
     SubsetFilteringSelection,
     ReferenceReward,
     SingleSurplusSelection,
 )
+
 
 def main():
     """Main function to run the counterfactual analysis."""
@@ -80,7 +81,7 @@ def main():
     # compare 3 mechanisms
     # 1. current, single winner
     # 2. currently implemented multiple winners, with less restrictive filtering
-    # 3. slightly more sophisticated selection of multiple winners
+    # 3. full combinatorial auction
     reward_cap_upper = args.reward_upper_cap
     reward_cap_lower = args.reward_lower_cap
     print(
@@ -121,17 +122,11 @@ def main():
         # with fairness filtering
         FilterRankRewardMechanism(
             BaselineFilter(),
-            MonotoneSelection(
-                SubsetFilteringSelection(
-                    filtering_function=DirectedTokenPairs(), cumulative_filtering=False
-                )
+            FullCombinatorialSelection(),
+            ReferenceReward(
+                FullCombinatorialSelection(), reward_cap_upper, reward_cap_lower
             ),
-            ReferenceReward(DirectSelection(
-                SubsetFilteringSelection(
-                    filtering_function=DirectedTokenPairs(), cumulative_filtering=False
-                )
-            ), reward_cap_upper, reward_cap_lower),
-        )
+        ),
     ]
 
     print("Running counterfactual analysis...")

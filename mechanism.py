@@ -1,3 +1,4 @@
+import itertools
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -252,6 +253,79 @@ class MonotoneSelection(WinnerSelection):
             )
 
         return selection, reference_scores
+
+
+@dataclass(frozen=True)
+class FullCombinatorialSelection(WinnerSelection):
+    def compute_best_bundle_solutions(
+        self, solutions: list[Solution]
+    ) -> dict[frozenset, Solution]:
+        """
+        Computes the best solution for each unique bundle of directed token pairs from a list
+        of solutions. A bundle is defined as a set of directed token pairs representing trades.
+        The best solution for a bundle is determined by its score, and only the highest-scored
+        solution for each bundle is retained.
+
+        Parameters
+        ----------
+        solutions : list[Solution]
+            A list of `Solution` objects representing potential trade bundles. Each solution
+            contains a collection of trades and a score attribute that determines its quality.
+
+        Returns
+        -------
+        dict[frozenset, Solution]
+            A dictionary where each key is a frozenset representing a unique bundle of
+            directed token pairs (sell token, buy token), and the corresponding value
+            is the best-scoring `Solution` for that bundle.
+
+        """
+        best_bundle_solutions: dict[frozenset, Solution] = {}
+        for solution in solutions:
+            directed_token_pairs = frozenset(
+                (trade.sell_token, trade.buy_token) for trade in solution.trades
+            )
+            if len(directed_token_pairs) == 0:
+                continue
+            if (
+                directed_token_pairs not in best_bundle_solutions
+                or best_bundle_solutions[directed_token_pairs].score < solution.score
+            ):
+                best_bundle_solutions[directed_token_pairs] = solution
+
+        return best_bundle_solutions
+
+    def select_winners(self, solutions: list[Solution]) -> list[Solution]:
+        best_bundle_solutions = self.compute_best_bundle_solutions(solutions)
+
+        all_token_pairs = set().union(*list(best_bundle_solutions.keys()))
+        if not all_token_pairs:
+            return []
+
+        best_partition_solutions: dict[frozenset, list[Solution]] = {frozenset(): []}
+
+        for level in range(1, len(all_token_pairs) + 1):
+            for subset in itertools.combinations(all_token_pairs, level):
+                best_bundle: frozenset = frozenset()
+                best_value = 0
+                for bundle, solution in best_bundle_solutions.items():
+                    if not bundle.issubset(frozenset(subset)):
+                        continue
+                    current_value = solution.score + compute_total_score(
+                        best_partition_solutions[frozenset(subset) - bundle]
+                    )
+                    if current_value > best_value:
+                        best_bundle = bundle
+                        best_value = current_value
+                if best_value == 0:
+                    best_partition_solutions[frozenset(subset)] = []
+                else:
+                    best_partition_solutions[frozenset(subset)] = (
+                        best_partition_solutions[frozenset(subset) - best_bundle]
+                        + [best_bundle_solutions[best_bundle]]
+                    )
+
+        return list(best_partition_solutions[frozenset(all_token_pairs)])
 
 
 class RewardMechanism(ABC):
