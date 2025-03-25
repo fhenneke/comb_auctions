@@ -181,7 +181,10 @@ class SolutionSelection(ABC):
 
 class SingleSurplusSelection(SolutionSelection):
     def select_solutions(self, solutions: list[Solution]) -> list[Solution]:
-        return [sorted(solutions, key=lambda solution: solution.score)[-1]]
+        if len(solutions) == 0:
+            return []
+        else:
+            return [sorted(solutions, key=lambda solution: solution.score)[-1]]
 
 
 @dataclass(frozen=True)
@@ -233,6 +236,8 @@ class MonotoneSelection(WinnerSelection):
     def winners_and_reference_scores(
         self, solutions: list[Solution]
     ) -> tuple[list[Solution], dict[str, int]]:
+        if not solutions:
+            return [], {}
         selection = self.selection_rule.select_solutions(solutions)
         score = compute_total_score(selection)
         solvers = list({solution.solver for solution in selection})

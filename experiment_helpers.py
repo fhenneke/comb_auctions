@@ -43,6 +43,9 @@ def run_counter_factual_analysis(
                 remove_order_from_solution(solution, order_uids_settled)
                 for solution in solutions
             ]
+            solutions_filtered = [
+                solution for solution in solutions_filtered if solution.score > 0
+            ]
         else:
             solutions_filtered = list(solutions)
         winners_rewards = mechanism.winners_and_rewards(solutions_filtered)
@@ -121,11 +124,17 @@ def compute_statistics(
     - Statistical values, such as scores and rewards, are converted to ETH and formatted
       for better readability.
     """
-    statistics: dict[str, list] = {"reward": [], "score": [], "throughput": []}
+    statistics: dict[str, list] = {
+        "reward": [],
+        "negative_reward": [],
+        "score": [],
+        "throughput": [],
+    }
     K = len(all_winners_rewards)
     for k in range(K):
         score_for_mechanism = 0
         rewards_for_mechanism = 0
+        negative_rewards = 0
         orders_settled_immediately = 0
         all_orders: set[str] = set()
         for solutions, (winners, rewards) in zip(
@@ -133,6 +142,9 @@ def compute_statistics(
         ):
             score_for_mechanism += sum(solution.score for solution in winners)
             rewards_for_mechanism += sum(reward for reward, _ in rewards.values())
+            negative_rewards += (
+                1 if any(reward == 0 for reward, _ in rewards.values()) else 0
+            )
             orders_settled = get_orders(winners)
             orders_proposed = get_orders(solutions)
             orders_settled_immediately += len(orders_settled - all_orders)
@@ -140,6 +152,9 @@ def compute_statistics(
 
         statistics["score"].append(score_for_mechanism)
         statistics["reward"].append(rewards_for_mechanism)
+        statistics["negative_reward"].append(
+            negative_rewards / len(auction_solutions_list)
+        )
         statistics["throughput"].append(orders_settled_immediately / len(all_orders))
 
     print("Statistics:")
@@ -157,11 +172,18 @@ def compute_statistics(
             f"(relative change: {(statistics["reward"][k] / statistics["reward"][0] - 1) * 100:.2f}%)"
         )
 
+    print("Negative reward:")
+    for k in range(K):
+        print(
+            f"mechanism {k} generated negative rewards in "
+            f"{statistics["negative_reward"][k] * 100:.2f}% of auctions"
+        )
+
     print(
         "Throughput (percentage of orders executed the first time a solution is proposed):"
     )
     for k in range(K):
         print(
-            f"mechanism {k} generated throughput of {statistics["throughput"][k] * 100:.2f}% ETH "
+            f"mechanism {k} generated throughput of {statistics["throughput"][k] * 100:.2f}% "
             f"(relative increase: {(statistics["throughput"][k] / statistics["throughput"][0] - 1) * 100:.2f}%)"
         )

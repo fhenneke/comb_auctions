@@ -118,8 +118,7 @@ def main():
                 reward_cap_lower,
             ),
         ),
-        # greedy choice of batches by surplus, in iteration checking for positive rewards
-        # with fairness filtering
+        # full combinatorial surplus maximization with fairness filtering
         FilterRankRewardMechanism(
             BaselineFilter(),
             FullCombinatorialSelection(),
