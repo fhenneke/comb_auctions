@@ -127,7 +127,7 @@ def compute_statistics(
     """
     statistics: dict[str, list] = {"reward": [], "score": [], "throughput": []}
     K = len(all_winners_rewards)
-    for k in range(1, K):
+    for k in range(K):
         score_for_mechanism = 0
         rewards_for_mechanism = 0
         orders_settled_immediately = 0
