@@ -388,7 +388,7 @@ class AuctionMechanism(ABC):
     def winners_and_rewards(
         self, solutions: list[Solution]
     ) -> tuple[list[Solution], dict[str, tuple[int, int]]]:
-        """Select winners and compute their rewards"""
+        """Select winners and compute rewards for solvers"""
 
 
 @dataclass(frozen=True)
