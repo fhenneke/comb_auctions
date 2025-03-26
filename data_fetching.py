@@ -1,4 +1,5 @@
 """Functionality for fetching solutions data from the competition endpoint."""
+
 import itertools
 import math
 import pickle
@@ -23,7 +24,8 @@ database_urls = {
 def fetch_auctions_from_db(start_id: int, end_id: int) -> list[list[Solution]]:
     engine = create_engine("postgresql+psycopg://" + database_urls["prod"], echo=True)
 
-    query = text(f"""with trade_data as (select ps.*,
+    query = text(
+        f"""with trade_data as (select ps.*,
                            pte.order_uid,
                            coalesce(o.sell_token, pjo.sell_token)  as sell_token,
                            coalesce(o.buy_token, pjo.buy_token)    as buy_token,
@@ -56,7 +58,8 @@ def fetch_auctions_from_db(start_id: int, end_id: int) -> list[list[Solution]]:
                                                   )
 
 select *
-from trade_data_with_prices""")
+from trade_data_with_prices"""
+    )
     with Session(engine) as session:
         with session.begin():
             result = session.execute(query)
@@ -66,12 +69,14 @@ from trade_data_with_prices""")
         auction_id = int(row.auction_id)
         solution_uid = int(row.uid)
         solutions_batch_dict[auction_id] = solutions_batch_dict.get(auction_id, {})
-        solutions_batch_dict[auction_id][solution_uid] = solutions_batch_dict[auction_id].get(
-            solution_uid, {})
+        solutions_batch_dict[auction_id][solution_uid] = solutions_batch_dict[
+            auction_id
+        ].get(solution_uid, {})
         solutions_batch_dict[auction_id][solution_uid] = {
             "solver": "0x" + row.solver.hex(),
             "score": row.score,
-            "trades": solutions_batch_dict[auction_id][solution_uid].get("trades", []) + [
+            "trades": solutions_batch_dict[auction_id][solution_uid].get("trades", [])
+            + [
                 {
                     "order_uid": "0x" + row.order_uid.hex(),
                     "sell_token": "0x" + row.sell_token.hex(),
@@ -84,7 +89,7 @@ from trade_data_with_prices""")
                     "sell_token_price": row.sell_token_price,
                     "buy_token_price": row.buy_token_price,
                 }
-            ]
+            ],
         }
 
     solutions_batch: list[list[Solution]] = []
@@ -115,7 +120,7 @@ from trade_data_with_prices""")
 
 def fetch_auctions(auction_start, auction_end):
     try:
-        with open(f"batches_{auction_start}_{auction_end}.pickle", 'rb') as handle:
+        with open(f"batches_{auction_start}_{auction_end}.pickle", "rb") as handle:
             solutions_batch = pickle.load(handle)
     except FileNotFoundError:
         solutions_batch = fetch_auctions_from_db(auction_start, auction_end)
@@ -129,8 +134,8 @@ def compute_surplus(trade_data) -> int:
     limit_buy = int(trade_data["limit_buy_amount"])
     executed_sell = int(trade_data["executed_sell_amount"])
     executed_buy = int(trade_data["executed_buy_amount"])
-    sell_price = Fraction(int(trade_data["sell_token_price"]), 10 ** 18)
-    buy_price = Fraction(int(trade_data["buy_token_price"]), 10 ** 18)
+    sell_price = Fraction(int(trade_data["sell_token_price"]), 10**18)
+    buy_price = Fraction(int(trade_data["buy_token_price"]), 10**18)
     if trade_data["kind"] == "sell":
         partial_limit_buy = math.ceil(Fraction(limit_buy * executed_sell, limit_sell))
         surplus = executed_buy - partial_limit_buy
@@ -143,8 +148,9 @@ def compute_surplus(trade_data) -> int:
 
 
 def compute_split_solutions(
-        solutions: list[Solution], efficiency_loss: float = 0.0,
-        approach: Literal["simple", "complete"] = "simple"
+    solutions: list[Solution],
+    efficiency_loss: float = 0.0,
+    approach: Literal["simple", "complete"] = "simple",
 ) -> list[Solution]:
     split_solutions: list[Solution] = []
     for solution in solutions:
@@ -152,8 +158,11 @@ def compute_split_solutions(
     return split_solutions
 
 
-def compute_split_solution(solution: Solution, efficiency_loss: float = 0.0,
-                           approach: Literal["simple", "complete"] = "simple"):
+def compute_split_solution(
+    solution: Solution,
+    efficiency_loss: float = 0.0,
+    approach: Literal["simple", "complete"] = "simple",
+):
     split_solution: list[Solution] = [solution]
     scores = aggregate_scores(solution)
     # make the following its own function
@@ -180,7 +189,9 @@ def compute_split_solution(solution: Solution, efficiency_loss: float = 0.0,
                 split_solution.append(Solution(solution_id, solver, score, trades))
         if approach == "complete":
             token_pairs = list(scores.keys())
-            for r in {1, 2, len(scores) - 2, len(scores) - 1} & set(range(1, len(scores))):
+            for r in {1, 2, len(scores) - 2, len(scores) - 1} & set(
+                range(1, len(scores))
+            ):
                 token_pair_subsets = itertools.combinations(token_pairs, r)
                 for token_pair_subset in token_pair_subsets:
                     solution_id = solution.id + "-" + str(token_pair_subset)
@@ -190,7 +201,10 @@ def compute_split_solution(solution: Solution, efficiency_loss: float = 0.0,
                             trade.id,
                             trade.sell_token,
                             trade.buy_token,
-                            int(trade.score * (1 - efficiency_loss) ** (len(token_pairs) - r))
+                            int(
+                                trade.score
+                                * (1 - efficiency_loss) ** (len(token_pairs) - r)
+                            ),
                         )
                         for trade in solution.trades
                         if (trade.sell_token, trade.buy_token) in token_pair_subset
@@ -200,9 +214,7 @@ def compute_split_solution(solution: Solution, efficiency_loss: float = 0.0,
                         trade.score is not None for trade in trades
                     ), f"score not set for all trades: {trades}"
                     score = sum(
-                        trade.score
-                        for trade in trades
-                        if trade.score is not None
+                        trade.score for trade in trades if trade.score is not None
                     )
 
                     split_solution.append(Solution(solution_id, solver, score, trades))
