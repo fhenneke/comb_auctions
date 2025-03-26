@@ -14,11 +14,9 @@ from mechanism import Solution, Trade, aggregate_scores
 
 load_dotenv()
 
-network = getenv("NETWORK", "")
-
 database_urls = {
-    "prod": getenv("PROD_DB_URL", "").replace("NETWORK", network),
-    "barn": getenv("BARN_DB_URL", "").replace("NETWORK", network),
+    "prod": getenv("PROD_DB_URL", ""),
+    "barn": getenv("BARN_DB_URL", ""),
 }
 
 
