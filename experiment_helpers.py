@@ -126,36 +126,64 @@ def compute_statistics(
     """
     statistics: dict[str, list] = {
         "reward": [],
-        "negative_reward": [],
         "score": [],
         "throughput": [],
+        "capped_rewards": [],
+        "negative_reward": [],
     }
     K = len(all_winners_rewards)
     for k in range(K):
-        score_for_mechanism = 0
-        rewards_for_mechanism = 0
-        negative_rewards = 0
+
+        # totals
+        score_sum = sum(
+            winner.score for winners, _ in all_winners_rewards[k] for winner in winners
+        )
+        reward_sum = sum(
+            reward
+            for _, rewards in all_winners_rewards[k]
+            for reward, _ in rewards.values()
+        )
+
+        # capping
+        reward_max = max(
+            reward
+            for _, rewards in all_winners_rewards[k]
+            for reward, _ in rewards.values()
+        )
+        capped_rewards = sum(
+            1
+            for _, rewards in all_winners_rewards[k]
+            if any(reward == reward_max for reward, _ in rewards.values())
+        )
+
+        negative_rewards = sum(
+            1
+            for _, rewards in all_winners_rewards[k]
+            if any(reward == 0 for reward, _ in rewards.values())
+        )
+
+        # throughput
         orders_settled_immediately = 0
         all_orders: set[str] = set()
         for solutions, (winners, rewards) in zip(
             auction_solutions_list, all_winners_rewards[k]
         ):
-            score_for_mechanism += sum(solution.score for solution in winners)
-            rewards_for_mechanism += sum(reward for reward, _ in rewards.values())
-            negative_rewards += (
-                1 if any(reward == 0 for reward, _ in rewards.values()) else 0
-            )
             orders_settled = get_orders(winners)
             orders_proposed = get_orders(solutions)
             orders_settled_immediately += len(orders_settled - all_orders)
             all_orders.update(orders_proposed)
 
-        statistics["score"].append(score_for_mechanism)
-        statistics["reward"].append(rewards_for_mechanism)
+        statistics["score"].append(score_sum)
+        statistics["reward"].append(reward_sum)
         statistics["negative_reward"].append(
             negative_rewards / len(auction_solutions_list)
         )
+        statistics["capped_rewards"].append(
+            capped_rewards / len(auction_solutions_list)
+        )
         statistics["throughput"].append(orders_settled_immediately / len(all_orders))
+
+    print(f"Number of auctions: {len(auction_solutions_list)}")
 
     print("Statistics:")
     print("Score:")
@@ -172,13 +200,6 @@ def compute_statistics(
             f"(relative change: {(statistics["reward"][k] / statistics["reward"][0] - 1) * 100:.2f}%)"
         )
 
-    print("Negative reward:")
-    for k in range(K):
-        print(
-            f"mechanism {k} generated negative rewards in "
-            f"{statistics["negative_reward"][k] * 100:.2f}% of auctions"
-        )
-
     print(
         "Throughput (percentage of orders executed the first time a solution is proposed):"
     )
@@ -186,4 +207,18 @@ def compute_statistics(
         print(
             f"mechanism {k} generated throughput of {statistics["throughput"][k] * 100:.2f}% "
             f"(relative increase: {(statistics["throughput"][k] / statistics["throughput"][0] - 1) * 100:.2f}%)"
+        )
+
+    print("Capping:")
+    for k in range(K):
+        print(
+            f"mechanism {k} has capped rewards in "
+            f"{statistics["capped_rewards"][k] * 100:.2f}% of auctions"
+        )
+
+    print("Negative reward:")
+    for k in range(K):
+        print(
+            f"mechanism {k} generated negative rewards in "
+            f"{statistics["negative_reward"][k] * 100:.2f}% of auctions"
         )
