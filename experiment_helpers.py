@@ -5,7 +5,7 @@ def run_counter_factual_analysis(
     auction_solutions_list: list[list[Solution]],
     mechanism: AuctionMechanism,
     remove_executed_orders: bool = True,
-) -> list[tuple[list[Solution], dict[str, tuple[int, int]]]]:
+) -> list[tuple[list[Solution], dict[str, int]]]:
     """Run a counterfactual analysis based on auction solutions.
 
     This function iterates through a list of auction solutions, evaluates the
@@ -86,7 +86,7 @@ def remove_order_from_solution(solution: Solution, order_uids: set[str]):
 
 def compute_statistics(
     auction_solutions_list: list[list[Solution]],
-    all_winners_rewards: list[list[tuple[list[Solution], dict[str, tuple[int, int]]]]],
+    all_winners_rewards: list[list[tuple[list[Solution], dict[str, int]]]],
 ) -> None:
     """
     Computes and prints statistical analysis of auction mechanisms by processing solutions
@@ -126,25 +126,25 @@ def compute_statistics(
         reward_sum = sum(
             reward
             for _, rewards in all_winners_rewards[k]
-            for reward, _ in rewards.values()
+            for reward in rewards.values()
         )
 
         # capping
         reward_max = max(
             reward
             for _, rewards in all_winners_rewards[k]
-            for reward, _ in rewards.values()
+            for reward in rewards.values()
         )
         capped_rewards = sum(
             1
             for _, rewards in all_winners_rewards[k]
-            if any(reward == reward_max for reward, _ in rewards.values())
+            if any(reward == reward_max for reward in rewards.values())
         )
 
         negative_rewards = sum(
             1
             for _, rewards in all_winners_rewards[k]
-            if any(reward == 0 for reward, _ in rewards.values())
+            if any(reward == 0 for reward in rewards.values())
         )
 
         # throughput

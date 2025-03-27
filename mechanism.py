@@ -28,46 +28,72 @@ def compute_total_score(solutions: list[Solution]) -> int:
 
 
 def aggregate_scores(solution: Solution) -> dict[tuple[str, str], int]:
+    """Aggregates scores for trades by token pairs in a solution.
+
+    This function processes a given solution containing trades and aggregates the
+    scores for each unique token pair (sell_token, buy_token). The result is a
+    dictionary where the keys are tuples representing token pairs, and the values
+    are the aggregated score for that pair. The function iterates through the
+    trades in the solution, summing the scores for trades with the same token pair.
+
+    Parameters
+    ----------
+    solution : Solution
+        An instance of the Solution class, which contains a list of trade objects.
+
+    Returns
+    -------
+    dict[tuple[str, str], int]
+        A dictionary where the keys are tuples of type (str, str), representing the
+        token pairs (sell_token, buy_token), and the values are integers
+        representing the aggregated score for each pair.
+
+    """
     scores: dict[tuple[str, str], int] = {}
     for trade in solution.trades:
-        score = trade.score if trade.score is not None else 0
         scores[(trade.sell_token, trade.buy_token)] = (
-            scores.get((trade.sell_token, trade.buy_token), 0) + score
+            scores.get((trade.sell_token, trade.buy_token), 0) + trade.score
         )
     return scores
 
 
 def compute_baseline_solutions(
-    solutions: list[Solution], only_baseline: bool = True
-) -> dict[tuple[str, str], tuple[Solution, Solution | None]]:
-    reference_solutions: dict[tuple[str, str], tuple[Solution, Solution | None]] = {}
+    solutions: list[Solution],
+) -> dict[tuple[str, str], Solution]:
+    """Compute baseline solutions from a list of solutions.
+
+    This function processes a list of `Solution` objects to determine the baseline
+    solutions by analyzing their aggregated scores. For each token pair present in
+    the aggregated scores, the function compares scores and selects the solution
+    with the highest score for each unique token pair.
+
+    Parameters
+    ----------
+    solutions: list of Solution
+        A list of `Solution` objects to be analyzed. Each solution contains
+        information, including an associated aggregated scores mapping
+        token pairs to scores.
+
+    Returns
+    -------
+    baseline_solutions: dict[tuple[str, str], Solution]
+        A dictionary where keys are token pairs (tuples of two strings)
+        and values are the baseline `Solution` objects associated with
+        the highest score for each token pair.
+    """
+    baseline_solutions: dict[tuple[str, str], Solution] = {}
     for solution in solutions:
         aggregated_scores = aggregate_scores(solution)
-        if only_baseline and len(aggregated_scores) > 1:
+        if len(aggregated_scores) > 1:
             continue
         for token_pair, score in aggregated_scores.items():
-            baseline_1, baseline_2 = reference_solutions.get(token_pair, (None, None))
-            baseline_score_1 = 0
-            baseline_score_2 = 0
-            if baseline_1 is not None:
-                baseline_scores_1 = aggregate_scores(baseline_1)
-                baseline_score_1 = baseline_scores_1.get(token_pair, 0)
-            if baseline_2 is not None:
-                baseline_scores_2 = aggregate_scores(baseline_2)
-                baseline_score_2 = baseline_scores_2.get(token_pair, 0)
-            if score > baseline_score_2:
-                if score > baseline_score_1:
-                    if baseline_1 is not None and baseline_1.solver == solution.solver:
-                        reference_solutions[token_pair] = (solution, baseline_2)
-                    else:
-                        reference_solutions[token_pair] = (solution, baseline_1)
-                elif baseline_1 is not None and baseline_1.solver != solution.solver:
-                    # `baseline_1 is not None` helps mypy, and cannot be false since
-                    # baseline_score_1 >= score > baseline_score_2 == 0
-                    # implies baseline_score_1 > 0 which is incompatible with baseline_1 == None
-                    reference_solutions[token_pair] = (baseline_1, solution)
+            if (
+                token_pair not in baseline_solutions
+                or score > baseline_solutions[token_pair].score
+            ):
+                baseline_solutions[token_pair] = solution
 
-    return reference_solutions
+    return baseline_solutions
 
 
 class SolutionFilter(ABC):
@@ -81,20 +107,6 @@ class NoFilter(SolutionFilter):
         return list(solutions)
 
 
-class DirectedTokenPairOverlapFilter(SolutionFilter):
-    def __init__(self, solution: Solution):
-        self.aggregated_scores = aggregate_scores(solution)
-
-    def filter(self, solutions: list[Solution]) -> list[Solution]:
-        filtered_solutions = [
-            solution
-            for solution in solutions
-            if len(aggregate_scores(solution).keys() & self.aggregated_scores.keys())
-            == 0
-        ]
-        return filtered_solutions
-
-
 @dataclass(frozen=True)
 class SolverFilter(SolutionFilter):
     solver: str
@@ -102,19 +114,6 @@ class SolverFilter(SolutionFilter):
     def filter(self, solutions: list[Solution]) -> list[Solution]:
         filtered_solutions = [
             solution for solution in solutions if solution.solver != self.solver
-        ]
-        return filtered_solutions
-
-
-@dataclass(frozen=True)
-class SolverFilterBatches(SolutionFilter):
-    solver: str
-
-    def filter(self, solutions: list[Solution]) -> list[Solution]:
-        filtered_solutions = [
-            solution
-            for solution in solutions
-            if solution.solver != self.solver or len(aggregate_scores(solution)) == 1
         ]
         return filtered_solutions
 
@@ -131,8 +130,8 @@ class BaselineFilter(SolutionFilter):
                 >= (
                     sum(
                         (
-                            trade.score if trade.score is not None else 0
-                            for trade in baseline_solutions[token_pair][0].trades
+                            trade.score
+                            for trade in baseline_solutions[token_pair].trades
                         ),
                         0,
                     )
@@ -145,25 +144,25 @@ class BaselineFilter(SolutionFilter):
         return filtered_solutions
 
 
-class FilterProperty(ABC):
+class BatchCompatibilityFilter(ABC):
     @abstractmethod
     def get_filter_set(self, solution: Solution) -> set:
         pass
 
 
-class DirectedTokenPairs(FilterProperty):
+class DirectedTokenPairs(BatchCompatibilityFilter):
     def get_filter_set(self, solution: Solution) -> set:
         return {(trade.sell_token, trade.buy_token) for trade in solution.trades}
 
 
-class TokenPairs(FilterProperty):
+class TokenPairs(BatchCompatibilityFilter):
     def get_filter_set(self, solution: Solution) -> set:
         return {
             frozenset((trade.sell_token, trade.buy_token)) for trade in solution.trades
         }
 
 
-class TradedTokens(FilterProperty):
+class TradedTokens(BatchCompatibilityFilter):
     def get_filter_set(self, solution: Solution) -> set:
         sell_tokens = {trade.sell_token for trade in solution.trades}
         buy_tokens = {trade.buy_token for trade in solution.trades}
@@ -183,14 +182,13 @@ class SingleSurplusSelection(SolutionSelection):
     def select_solutions(self, solutions: list[Solution]) -> list[Solution]:
         if len(solutions) == 0:
             return []
-        else:
-            return [sorted(solutions, key=lambda solution: solution.score)[-1]]
+        return [sorted(solutions, key=lambda solution: solution.score)[-1]]
 
 
 @dataclass(frozen=True)
 class SubsetFilteringSelection(SolutionSelection):
-    cumulative_filtering: bool = True
-    filtering_function: FilterProperty = TradedTokens()
+    cumulative_filtering: bool = False
+    filtering_function: BatchCompatibilityFilter = TradedTokens()
 
     def select_solutions(self, solutions: list[Solution]) -> list[Solution]:
         sorted_solutions = sorted(
@@ -228,6 +226,22 @@ class DirectSelection(WinnerSelection):
 
 @dataclass(frozen=True)
 class MonotoneSelection(WinnerSelection):
+    """
+    MonotoneSelection implements a selection of winners based on a first selecting
+    candidates for winners using `selection_rule`, and then checking if their rewards
+    were positive when using a reference solution based on `selection_rule`. If rewards
+    are negative, the winner is removed and a new set of candidates is computed.
+
+    Using this approach, the total surplus of candidates increases whenever a solver
+    is excluded.
+
+    Attributes
+    ----------
+    selection_rule : SolutionSelection
+        The rule used for selecting solutions from the input list. This is
+        implemented as an instance of `SolutionSelection`.
+    """
+
     selection_rule: SolutionSelection
 
     def select_winners(self, solutions: list[Solution]) -> list[Solution]:
@@ -253,7 +267,6 @@ class MonotoneSelection(WinnerSelection):
 
         if reference_scores[solver_max] > score:
             return self.winners_and_reference_scores(
-                # SolverFilterBatches(solver_max).filter(solutions)
                 SolverFilter(solver_max).filter(solutions)
             )
 
@@ -262,6 +275,23 @@ class MonotoneSelection(WinnerSelection):
 
 @dataclass(frozen=True)
 class FullCombinatorialSelection(WinnerSelection):
+    """
+    FullCombinatorialSelection implements a selection of winners based on full
+    combinatorial maximization of score.
+
+    The algorithm is based on the following steps:
+    - Compute the best solution for each unique bundle of directed token pairs. Only
+      these solutions can appear in the final set of winners.
+      This step is done by iterating once through the input list of solutions.
+    - Select the best collection of solutions for each bundle. This iteration through bundles
+      by number of directed token pairs. For each fixed bundle, one iterates through all of their
+      subsets, and reduces the problem to smaller bundles.
+      For k token pairs in total this iterates through all 2**k possible bundles
+      and checks all 2**k possible solutions in each case, for a runtime of O(4**k).
+
+    Compatibility of batches is based on directed token pairs.
+    """
+
     def compute_best_bundle_solutions(
         self, solutions: list[Solution]
     ) -> dict[frozenset, Solution]:
@@ -279,7 +309,7 @@ class FullCombinatorialSelection(WinnerSelection):
 
         Returns
         -------
-        dict[frozenset, Solution]
+        best_bundle_solutions: dict[frozenset, Solution]
             A dictionary where each key is a frozenset representing a unique bundle of
             directed token pairs (sell token, buy token), and the corresponding value
             is the best-scoring `Solution` for that bundle.
@@ -337,27 +367,60 @@ class RewardMechanism(ABC):
     @abstractmethod
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        """Compute rewards for all winning solutions"""
+    ) -> dict[str, int]:
+        """
+        Abstract method to compute rewards for solvers based on winners and solutions.
+
+        This method calculates the rewards for solvers, mapping each solver to its
+        respective reward value.
+
+        It is expected to be overridden by concrete subclasses implementing specific reward
+        computation strategies.
+
+        Parameters
+        ----------
+        winners : list[Solution]
+            A list of solutions that are marked as winners.
+        solutions : list[Solution]
+            A list of all solutions from which winners were selected.
+
+        Returns
+        -------
+        dict[str, int]
+            A dictionary where the keys are solvers and the values are the
+            respective rewards (as integers in atoms of the native token).
+        """
 
 
 class NoReward(RewardMechanism):
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        return {winner.id: (0, 0) for winner in winners}
+    ) -> dict[str, int]:
+        return {winner.id: 0 for winner in winners}
 
 
 @dataclass(frozen=True)
 class ReferenceReward(RewardMechanism):
+    """
+    ReferenceReward computes rewards for winners based on reference solutions.
+
+    Given a list of winners and a list of solutions, this class implements the
+    computation of rewards for each winner based on a reference solution computed
+    using `winner_selection` after filtering out solutions from the winner.
+
+    Rewards are capped from above using upper cap.
+
+    Penalties are currently not implemented (and the lower cap is not used).
+    """
+
     winner_selection: WinnerSelection
     upper_cap: int
     lower_cap: int
 
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
-    ) -> dict[str, tuple[int, int]]:
-        rewards: dict[str, tuple[int, int]] = {}
+    ) -> dict[str, int]:
+        rewards: dict[str, int] = {}
         winning_solvers = {winner.solver for winner in winners}
         score = compute_total_score(winners)
         for solver in winning_solvers:
@@ -369,10 +432,7 @@ class ReferenceReward(RewardMechanism):
                 reference_score = min(score, compute_total_score(reference_winners))
             else:
                 reference_score = 0
-            rewards[solver] = (
-                min(score - reference_score, self.upper_cap),
-                -min(reference_score, self.lower_cap),
-            )
+            rewards[solver] = min(score - reference_score, self.upper_cap)
 
         return rewards
 
@@ -381,19 +441,56 @@ class AuctionMechanism(ABC):
     @abstractmethod
     def winners_and_rewards(
         self, solutions: list[Solution]
-    ) -> tuple[list[Solution], dict[str, tuple[int, int]]]:
-        """Select winners and compute rewards for solvers"""
+    ) -> tuple[list[Solution], dict[str, int]]:
+        """
+        Determines the winners among the provided solutions and calculates their
+        corresponding rewards.
+
+        This method evaluates a list of solutions, identifies which ones are the
+        winners based on a defined criterion, and assigns rewards accordingly.
+        The winners are returned as a list, and the rewards are returned as a
+        dictionary where the keys are identifiers of winning solvers, and the values
+        represent the respective rewards.
+
+        Parameters
+        ----------
+        solutions : list[Solution]
+            A list of solution objects. Each solution contains information
+            that is evaluated to determine if it qualifies as a winner.
+
+        Returns
+        -------
+        tuple[list[Solution], dict[str, int]]
+            A tuple containing:
+            - A list of winning `Solution` objects.
+            - A dictionary mapping solvers to their respective rewards.
+        """
 
 
 @dataclass(frozen=True)
 class FilterRankRewardMechanism(AuctionMechanism):
+    """
+    FilterRankRewardMechanism class handles the combined operations of solution filtering, winner
+    selection, and reward computation within an auction mechanism. It integrates these stages to
+    determine winners and associated rewards.
+
+    Attributes
+    ----------
+    solution_filter : SolutionFilter
+        An instance responsible for filtering solutions based on predefined criteria.
+    winner_selection : WinnerSelection
+        An instance responsible for selecting winners from the filtered solutions.
+    reward_mechanism : RewardMechanism
+        An instance responsible for computing rewards for the selected winners.
+    """
+
     solution_filter: SolutionFilter
     winner_selection: WinnerSelection
     reward_mechanism: RewardMechanism
 
     def winners_and_rewards(
         self, solutions: list[Solution]
-    ) -> tuple[list[Solution], dict[str, tuple[int, int]]]:
+    ) -> tuple[list[Solution], dict[str, int]]:
         filtered_solutions = self.solution_filter.filter(solutions)
         winners = self.winner_selection.select_winners(filtered_solutions)
         rewards = self.reward_mechanism.compute_rewards(winners, filtered_solutions)
