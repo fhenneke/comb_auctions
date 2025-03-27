@@ -100,12 +100,31 @@ def main():
                 10**16,
             ),
         ),
-        # greedy choice of batches by surplus, with fairness filtering
+        # greedy choice of batches by surplus, without fairness filtering
         FilterRankRewardMechanism(
-            BaselineFilter(),
+            NoFilter(),
             DirectSelection(
                 SubsetFilteringSelection(
-                    filtering_function=TradedTokens(), cumulative_filtering=False
+                    filtering_function=TradedTokens(), cumulative_filtering=True
+                )
+            ),
+            ReferenceReward(
+                DirectSelection(
+                    SubsetFilteringSelection(
+                        filtering_function=TradedTokens(),
+                        cumulative_filtering=True,
+                    )
+                ),
+                12 * 10**15,
+                10**16,
+            ),
+        ),
+        # greedy choice of batches by surplus, with fairness filtering
+        FilterRankRewardMechanism(
+            NoFilter(),
+            DirectSelection(
+                SubsetFilteringSelection(
+                    filtering_function=DirectedTokenPairs(), cumulative_filtering=False
                 )
             ),
             ReferenceReward(
@@ -159,9 +178,12 @@ def main():
         ),  # better winner selection (directed token pairs)
         run_counter_factual_analysis(
             solutions_batch_split, mechanisms[2]
-        ),  # fair, multiple winners (directed token pairs)
+        ),  # multiple solutions per solver, winner selection (directed token pairs)
         run_counter_factual_analysis(
             solutions_batch_split, mechanisms[3]
+        ),  # fair, multiple winners (directed token pairs)
+        run_counter_factual_analysis(
+            solutions_batch_split, mechanisms[4]
         ),  # fair, full comb. win. (full comb. auction)
     ]
 
