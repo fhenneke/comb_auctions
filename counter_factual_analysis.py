@@ -12,6 +12,7 @@ from mechanism import (
     SubsetFilteringSelection,
     ReferenceReward,
     SingleSurplusSelection,
+    TradedTokens,
 )
 
 
@@ -95,8 +96,27 @@ def main():
             DirectSelection(SingleSurplusSelection()),
             ReferenceReward(
                 DirectSelection(SingleSurplusSelection()),
-                reward_cap_upper,
-                reward_cap_lower,
+                12 * 10**15,
+                10**16,
+            ),
+        ),
+        # greedy choice of batches by surplus, with fairness filtering
+        FilterRankRewardMechanism(
+            BaselineFilter(),
+            DirectSelection(
+                SubsetFilteringSelection(
+                    filtering_function=TradedTokens(), cumulative_filtering=False
+                )
+            ),
+            ReferenceReward(
+                DirectSelection(
+                    SubsetFilteringSelection(
+                        filtering_function=DirectedTokenPairs(),
+                        cumulative_filtering=False,
+                    )
+                ),
+                12 * 10**15,
+                10**16,
             ),
         ),
         # greedy choice of batches by surplus, with fairness filtering
@@ -130,11 +150,22 @@ def main():
 
     print("Running counterfactual analysis...")
     all_winners_rewards = [
-        run_counter_factual_analysis(solutions_batch_split, mechanism)
-        for mechanism in mechanisms
+        run_counter_factual_analysis(solutions_batch, mechanisms[0]),  # current
+        run_counter_factual_analysis(
+            solutions_batch, mechanisms[1]
+        ),  # current multiple winners (tokens traded)
+        run_counter_factual_analysis(
+            solutions_batch, mechanisms[2]
+        ),  # better winner selection (directed token pairs)
+        run_counter_factual_analysis(
+            solutions_batch_split, mechanisms[2]
+        ),  # fair, multiple winners (directed token pairs)
+        run_counter_factual_analysis(
+            solutions_batch_split, mechanisms[3]
+        ),  # fair, full comb. win. (full comb. auction)
     ]
 
-    compute_statistics(solutions_batch_split, all_winners_rewards)
+    compute_statistics(solutions_batch, all_winners_rewards)
 
 
 if __name__ == "__main__":
