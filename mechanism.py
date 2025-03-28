@@ -188,7 +188,7 @@ class SingleSurplusSelection(SolutionSelection):
 @dataclass(frozen=True)
 class SubsetFilteringSelection(SolutionSelection):
     cumulative_filtering: bool = False
-    filtering_function: BatchCompatibilityFilter = TradedTokens()
+    batch_compatibility: BatchCompatibilityFilter = DirectedTokenPairs()
 
     def select_solutions(self, solutions: list[Solution]) -> list[Solution]:
         sorted_solutions = sorted(
@@ -197,7 +197,7 @@ class SubsetFilteringSelection(SolutionSelection):
         selection: list[Solution] = []
         filter_set: set[str] = set()
         for solution in sorted_solutions:
-            solution_filter_set = self.filtering_function.get_filter_set(solution)
+            solution_filter_set = self.batch_compatibility.get_filter_set(solution)
             if len(solution_filter_set & filter_set) == 0:
                 selection.append(solution)
                 if (

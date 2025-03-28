@@ -105,13 +105,13 @@ def main():
             NoFilter(),
             DirectSelection(
                 SubsetFilteringSelection(
-                    filtering_function=TradedTokens(), cumulative_filtering=True
+                    batch_compatibility=TradedTokens(), cumulative_filtering=True
                 )
             ),
             ReferenceReward(
                 DirectSelection(
                     SubsetFilteringSelection(
-                        filtering_function=TradedTokens(),
+                        batch_compatibility=TradedTokens(),
                         cumulative_filtering=True,
                     )
                 ),
@@ -124,13 +124,13 @@ def main():
             NoFilter(),
             DirectSelection(
                 SubsetFilteringSelection(
-                    filtering_function=DirectedTokenPairs(), cumulative_filtering=False
+                    batch_compatibility=DirectedTokenPairs(), cumulative_filtering=False
                 )
             ),
             ReferenceReward(
                 DirectSelection(
                     SubsetFilteringSelection(
-                        filtering_function=DirectedTokenPairs(),
+                        batch_compatibility=DirectedTokenPairs(),
                         cumulative_filtering=False,
                     )
                 ),
@@ -143,13 +143,13 @@ def main():
             BaselineFilter(),
             DirectSelection(
                 SubsetFilteringSelection(
-                    filtering_function=DirectedTokenPairs(), cumulative_filtering=False
+                    batch_compatibility=DirectedTokenPairs(), cumulative_filtering=False
                 )
             ),
             ReferenceReward(
                 DirectSelection(
                     SubsetFilteringSelection(
-                        filtering_function=DirectedTokenPairs(),
+                        batch_compatibility=DirectedTokenPairs(),
                         cumulative_filtering=False,
                     )
                 ),
