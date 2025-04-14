@@ -12,6 +12,8 @@ If you want to test historical auctions, you need to provide database credential
 
 At the moment, the data fetching can take 1 minute the first time it is run. Data is then stored in a 80MB file and not fetched again (for the same range of auctions).
 
+If you have git-lfs installed, a set of auctions should be automatically downloaded with the repo. Otherwise, you can download a set of auctions from the release page. In this way you can run the experiment without access to the database.
+
 ## Running the script
 
 
