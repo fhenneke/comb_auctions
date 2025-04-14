@@ -44,15 +44,3 @@ options:
   --reward_lower_cap REWARD_LOWER_CAP
                         Lower cap for rewards in wei (default: 10^16)
 ```
-
-
-The jupyter notebook server can be started with
-
-```sh
-uv run jupyter notebook
-```
-
-From within jupyter, the notebook `multiple_winners.ipynb` can be selected and run.
-
-The notebook has the option to test artificial auctions.
-
