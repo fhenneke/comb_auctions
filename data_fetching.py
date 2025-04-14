@@ -189,9 +189,7 @@ def compute_split_solution(
                 split_solution.append(Solution(solution_id, solver, score, trades))
         if approach == "complete":
             token_pairs = list(scores.keys())
-            for r in {1, 2, len(scores) - 2, len(scores) - 1} & set(
-                range(1, len(scores))
-            ):
+            for r in range(1, len(scores)):
                 token_pair_subsets = itertools.combinations(token_pairs, r)
                 for token_pair_subset in token_pair_subsets:
                     solution_id = solution.id + "-" + str(token_pair_subset)
