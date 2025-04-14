@@ -100,44 +100,6 @@ def main():
                 10**16,
             ),
         ),
-        # greedy choice of batches by surplus, without fairness filtering
-        FilterRankRewardMechanism(
-            NoFilter(),
-            DirectSelection(
-                SubsetFilteringSelection(
-                    batch_compatibility=TradedTokens(), cumulative_filtering=True
-                )
-            ),
-            ReferenceReward(
-                DirectSelection(
-                    SubsetFilteringSelection(
-                        batch_compatibility=TradedTokens(),
-                        cumulative_filtering=True,
-                    )
-                ),
-                12 * 10**15,
-                10**16,
-            ),
-        ),
-        # greedy choice of batches by surplus, with fairness filtering
-        FilterRankRewardMechanism(
-            NoFilter(),
-            DirectSelection(
-                SubsetFilteringSelection(
-                    batch_compatibility=DirectedTokenPairs(), cumulative_filtering=False
-                )
-            ),
-            ReferenceReward(
-                DirectSelection(
-                    SubsetFilteringSelection(
-                        batch_compatibility=DirectedTokenPairs(),
-                        cumulative_filtering=False,
-                    )
-                ),
-                12 * 10**15,
-                10**16,
-            ),
-        ),
         # greedy choice of batches by surplus, with fairness filtering
         FilterRankRewardMechanism(
             BaselineFilter(),
@@ -171,19 +133,10 @@ def main():
     all_winners_rewards = [
         run_counter_factual_analysis(solutions_batch, mechanisms[0]),  # current
         run_counter_factual_analysis(
-            solutions_batch, mechanisms[1]
-        ),  # current multiple winners (tokens traded)
-        run_counter_factual_analysis(
-            solutions_batch, mechanisms[2]
-        ),  # better winner selection (directed token pairs)
-        run_counter_factual_analysis(
-            solutions_batch_split, mechanisms[2]
-        ),  # multiple solutions per solver, winner selection (directed token pairs)
-        run_counter_factual_analysis(
-            solutions_batch_split, mechanisms[3]
+            solutions_batch_split, mechanisms[1]
         ),  # fair, multiple winners (directed token pairs)
         run_counter_factual_analysis(
-            solutions_batch_split, mechanisms[4]
+            solutions_batch_split, mechanisms[2]
         ),  # fair, full comb. win. (full comb. auction)
     ]
 
