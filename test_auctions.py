@@ -40,7 +40,13 @@ def test_single_bid(mechanism):
         )
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions
+    assert winning_score == 200
+    assert reference_scores == {"solver 1": 0}
     assert rewards == {"solver 1": 200}
 
 
@@ -61,7 +67,13 @@ def test_compatible_bids(mechanism):
         ),
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions
+    assert winning_score == 300
+    assert reference_scores == {"solver 1": 100, "solver 2": 200}
     assert rewards == {"solver 1": 200, "solver 2": 100}
 
 
@@ -82,7 +94,13 @@ def test_multiple_solution_for_solver(mechanism):
         ),
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions
+    assert winning_score == 300
+    assert reference_scores == {"solver 1": 0}
     assert rewards == {"solver 1": 300}
 
 
@@ -103,7 +121,13 @@ def test_incompatible_bids(mechanism):
         ),
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions[0:1]
+    assert winning_score == 200
+    assert reference_scores == {"solver 1": 100}
     assert rewards == {"solver 1": 100}
 
 
@@ -124,7 +148,13 @@ def test_fairness_filtering(mechanism):
         ),
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions[1:2]
+    assert winning_score == 150
+    assert reference_scores == {"solver 2": 0}
     assert rewards == {"solver 2": 150}
 
 
@@ -145,7 +175,13 @@ def test_aggregation_on_token_pair(mechanism):
         ),
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions[0:1]
+    assert winning_score == 200
+    assert reference_scores == {"solver 1": 150}
     assert rewards == {"solver 1": 50}
 
 
@@ -176,7 +212,13 @@ def test_reference_better_than_winners(mechanism):
         ),
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions[0:1]
+    assert winning_score == 300
+    assert reference_scores == {"solver 1": 380}
     assert rewards == {"solver 1": 0}
 
 
@@ -191,5 +233,11 @@ def test_cap_from_above(mechanism):
         )
     ]
     winners, rewards = mechanism.winners_and_rewards(solutions)
+    winning_score = sum(solution.score for solution in winners)
+    reference_scores = mechanism.reward_mechanism.compute_reference_scores(
+        winners, mechanism.solution_filter.filter(solutions)
+    )
     assert winners == solutions
+    assert winning_score == 13 * 10**15
+    assert reference_scores == {"solver 1": 0}
     assert rewards == {"solver 1": 12 * 10**15}
