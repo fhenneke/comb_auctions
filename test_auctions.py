@@ -1,3 +1,5 @@
+"""Tests for the auction mechanism."""
+
 import pytest
 
 from mechanism import (
