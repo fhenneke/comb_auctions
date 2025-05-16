@@ -420,21 +420,32 @@ class ReferenceReward(RewardMechanism):
     def compute_rewards(
         self, winners: list[Solution], solutions: list[Solution]
     ) -> dict[str, int]:
-        rewards: dict[str, int] = {}
+        total_score = compute_total_score(winners)
+        reference_scores = self.compute_reference_scores(winners, solutions)
+        rewards = {
+            solver: min(max(total_score - reference_score, 0), self.upper_cap)
+            for solver, reference_score in reference_scores.items()
+        }
+
+        return rewards
+
+    def compute_reference_scores(
+        self, winners: list[Solution], solutions: list[Solution]
+    ) -> dict[str, int]:
+        reference_scores: dict[str, int] = {}
         winning_solvers = {winner.solver for winner in winners}
-        score = compute_total_score(winners)
         for solver in winning_solvers:
             filtered_solutions = SolverFilter(solver).filter(solutions)
             if filtered_solutions:
                 reference_winners = self.winner_selection.select_winners(
                     filtered_solutions
                 )
-                reference_score = min(score, compute_total_score(reference_winners))
+                reference_score = compute_total_score(reference_winners)
             else:
                 reference_score = 0
-            rewards[solver] = min(score - reference_score, self.upper_cap)
+            reference_scores[solver] = reference_score
 
-        return rewards
+        return reference_scores
 
 
 class AuctionMechanism(ABC):
