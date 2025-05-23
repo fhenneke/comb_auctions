@@ -104,7 +104,7 @@ from trade_data_with_prices"""
                 order_uid: str = trade_data["order_uid"]
                 sell_token = trade_data["sell_token"]
                 buy_token = trade_data["buy_token"]
-                score = compute_surplus(trade_data)
+                score = compute_score(trade_data)
                 trades.append(Trade(order_uid, sell_token, buy_token, score))
             solution = Solution(
                 id=str(solution_uid) + "-" + solver,
@@ -129,22 +129,21 @@ def fetch_auctions(auction_start, auction_end):
     return solutions_batch
 
 
-def compute_surplus(trade_data) -> int:
+def compute_score(trade_data) -> int:
     limit_sell = int(trade_data["limit_sell_amount"])
     limit_buy = int(trade_data["limit_buy_amount"])
     executed_sell = int(trade_data["executed_sell_amount"])
     executed_buy = int(trade_data["executed_buy_amount"])
-    sell_price = Fraction(int(trade_data["sell_token_price"]), 10**18)
     buy_price = Fraction(int(trade_data["buy_token_price"]), 10**18)
     if trade_data["kind"] == "sell":
         partial_limit_buy = math.ceil(Fraction(limit_buy * executed_sell, limit_sell))
         surplus = executed_buy - partial_limit_buy
-        surplus_eth = math.floor(surplus * buy_price)
+        score = math.floor(surplus * buy_price)
     else:
         partial_limit_sell = math.floor(Fraction(limit_sell * executed_buy, limit_buy))
         surplus = partial_limit_sell - executed_sell
-        surplus_eth = math.floor(surplus * sell_price)
-    return surplus_eth
+        score = math.floor(surplus * Fraction(limit_buy, limit_sell) * buy_price)
+    return score
 
 
 def compute_split_solutions(
