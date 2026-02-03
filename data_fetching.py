@@ -22,7 +22,7 @@ database_urls = {
 
 
 def fetch_auctions_from_db(start_id: int, end_id: int) -> list[list[Solution]]:
-    engine = create_engine("postgresql+psycopg://" + database_urls["prod"], echo=True)
+    engine = create_engine("postgresql+psycopg://" + database_urls["prod"])
 
     query = text(
         f"""with trade_data as (select ps.*,
