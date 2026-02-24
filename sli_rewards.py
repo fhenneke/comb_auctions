@@ -55,9 +55,7 @@ def compute_participation_rates(solutions_batch):
     participation_rates = {solver: nr_orders / total_orders for solver, nr_orders in orders_per_solver.items()}
     return participation_rates
 
-participation_rates = compute_participation_rates(solutions_batch)
-
-def robust_surplus_metric(solutions):
+def robust_surplus_metric(solutions, participation_rates):
     robust_surplus = 0
     all_order_uids = {trade.id for solution in solutions for trade in solution.trades}
     for order_uid in all_order_uids:
@@ -75,66 +73,77 @@ def robust_surplus_metric(solutions):
         robust_surplus += robust_surplus_order
     return robust_surplus
 
-metrics = [surplus_metric, nr_orders_metric, robust_surplus_metric]
+def compute_metrics(solutions_batch):
+    participation_rates = compute_participation_rates(solutions_batch)
+    metrics = [surplus_metric, nr_orders_metric, lambda x: robust_surplus_metric(x, participation_rates)]
+    all_winners_rewards = []
+    all_metrics = []
+    reference_metrics = []
+    single_metrics = []
+    for solutions in solutions_batch:
+        winners, rewards = mechanism.winners_and_rewards(solutions)
+        all_winners_rewards.append((winners, rewards))
+        # all_metrics.append([metric(winners) for metric in metrics])
+        all_metrics.append([metric(solutions) for metric in metrics])
+        reference_metrics.append({})
+        single_metrics.append({})
+        solvers = {solution.solver for solution in solutions}
+        # metrics if solver were removed
+        for solver in solvers:
+            filtered_solutions = [solution for solution in solutions if solution.solver != solver]
+            # reference_winners, _ = mechanism.winners_and_rewards(
+            #     filtered_solutions
+            # )
+            # reference_metrics[-1][solver] = [metric(reference_winners) for metric in metrics]
+            reference_metrics[-1][solver] = [metric(filtered_solutions) for metric in metrics]
+        # metric if only one solver participated
+        for solver in solvers:
+            filtered_solutions = [solution for solution in solutions if solution.solver == solver]
+            # reference_winners, _ = mechanism.winners_and_rewards(
+            #     filtered_solutions
+            # )
+            # single_metrics[-1][solver] = [metric(reference_winners) for metric in metrics]
+            single_metrics[-1][solver] = [metric(filtered_solutions) for metric in metrics]
 
-all_winners_rewards = []
-all_metrics = []
-reference_metrics = []
-single_metrics = []
-for solutions in solutions_batch:
-    winners, rewards = mechanism.winners_and_rewards(solutions)
-    all_winners_rewards.append((winners, rewards))
-    all_metrics.append([metric(winners) for metric in metrics])
-    reference_metrics.append({})
-    single_metrics.append({})
-    solvers = {solution.solver for solution in solutions}
-    # metrics if solver were removed
-    for solver in solvers:
-        filtered_solutions = [solution for solution in solutions if solution.solver != solver]
-        # reference_winners, _ = mechanism.winners_and_rewards(
-        #     filtered_solutions
-        # )
-        # reference_metrics[-1][solver] = [metric(reference_winners) for metric in metrics]
-        reference_metrics[-1][solver] = [metric(filtered_solutions) for metric in metrics]
-    # metric if only one solver participated
-    for solver in solvers:
-        filtered_solutions = [solution for solution in solutions if solution.solver == solver]
-        # reference_winners, _ = mechanism.winners_and_rewards(
-        #     filtered_solutions
-        # )
-        # single_metrics[-1][solver] = [metric(reference_winners) for metric in metrics]
-        single_metrics[-1][solver] = [metric(filtered_solutions) for metric in metrics]
+    # set up polars data frames
+    auction_metrics_df = pl.DataFrame(
+        all_metrics,
+        schema=["surplus", "nr_orders", "robust_surplus"],
+        orient="row",
+    ).with_row_index("index")
+    metric_without_solver_df = pl.DataFrame(
+        [[i, k, v[0], v[1], v[2]] for i, d in enumerate(reference_metrics) for k, v in d.items()],
+        schema=["index", "solver", "surplus", "nr_orders", "robust_surplus"],
+        orient="row",
+    )
+    metric_improvement_df = metric_without_solver_df.join(
+        auction_metrics_df, on="index", suffix="_t2"
+    ).select(
+        "index",
+        "solver",
+        (pl.col("surplus_t2") - pl.col("surplus")).alias("surplus_marginal"),
+        (pl.col("nr_orders_t2") - pl.col("nr_orders")).alias("nr_orders_marginal"),
+        (pl.col("robust_surplus_t2") - pl.col("robust_surplus")).alias("robust_surplus_marginal"),
+    )
+    metric_with_single_solver_df = pl.DataFrame(
+        [[i, k, v[0], v[1], v[2]] for i, d in enumerate(single_metrics) for k, v in d.items()],
+        schema=["index", "solver", "surplus_individual", "nr_orders_individual", "robust_surplus_individual"],
+        orient="row",
+    )
 
-# set up polars data frames
-auction_metrics_df = pl.DataFrame(
-    all_metrics,
-    schema=["surplus", "nr_orders", "robust_surplus"],
-    orient="row",
-).with_row_index("index")
-metric_without_solver_df = pl.DataFrame(
-    [[i, k, v[0], v[1], v[2]] for i, d in enumerate(reference_metrics) for k, v in d.items()],
-    schema=["index", "solver", "surplus", "nr_orders", "robust_surplus"],
-    orient="row",
-)
-metric_improvement_df = metric_without_solver_df.join(
-    auction_metrics_df, on="index", suffix="_t2"
-).select(
-    "index",
-    "solver",
-    (pl.col("surplus_t2") - pl.col("surplus")).alias("surplus_marginal"),
-    (pl.col("nr_orders_t2") - pl.col("nr_orders")).alias("nr_orders_marginal"),
-    (pl.col("robust_surplus_t2") - pl.col("robust_surplus")).alias("robust_surplus_marginal"),
-)
-metric_with_single_solver_df = pl.DataFrame(
-    [[i, k, v[0], v[1], v[2]] for i, d in enumerate(single_metrics) for k, v in d.items()],
-    schema=["index", "solver", "surplus_individual", "nr_orders_individual", "robust_surplus_individual"],
-    orient="row",
-)
+    combined_metrics_df = metric_improvement_df.join(
+        metric_with_single_solver_df, on=["index", "solver"]
+    )
 
-combined_metrics_df = metric_improvement_df.join(
-    metric_with_single_solver_df, on=["index", "solver"]
-).sort(by="surplus_marginal")
+    return combined_metrics_df
 
+
+
+combined_metrics_df = compute_metrics(solutions_batch)
+combined_metrics_df.group_by(pl.col("solver")).sum().sort(by="surplus_marginal", descending=True)
+
+combined_metrics_without_small_orders_df = compute_metrics([[solution for solution in solutions if not (solution.solver == "0xa9d635ef85bc37eb9ff9d6165481ea230ed32392" and sum(trade.volume for trade in solution.trades) < 10**18)] for solutions in solutions_batch])
+combined_metrics_without_small_orders_df.group_by(pl.col("solver")).sum().sort(by="surplus_marginal", descending=True)
 
 # Reshape to long format for grouped bars
 df_long = combined_metrics_df.group_by(pl.col("solver")).sum().unpivot(
