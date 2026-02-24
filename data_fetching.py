@@ -104,8 +104,9 @@ from trade_data_with_prices"""
                 order_uid: str = trade_data["order_uid"]
                 sell_token = trade_data["sell_token"]
                 buy_token = trade_data["buy_token"]
+                volume = compute_volume(trade_data)
                 score = compute_score(trade_data)
-                trades.append(Trade(order_uid, sell_token, buy_token, score))
+                trades.append(Trade(order_uid, sell_token, buy_token, volume, score))
             solution = Solution(
                 id=str(solution_uid) + "-" + solver,
                 solver=solver,
@@ -128,6 +129,19 @@ def fetch_auctions(auction_start, auction_end):
             pickle.dump(solutions_batch, handle, protocol=-1)
     return solutions_batch
 
+def compute_volume(trade_data) -> int:
+    executed_sell = int(trade_data["executed_sell_amount"])
+    executed_buy = int(trade_data["executed_buy_amount"])
+    buy_price = Fraction(int(trade_data["buy_token_price"]), 10**18)
+    if trade_data["kind"] == "sell":
+        executed_buy = int(trade_data["executed_buy_amount"])
+        buy_price = Fraction(int(trade_data["buy_token_price"]), 10**18)
+        volume = math.floor(executed_buy * buy_price)
+    else:
+        executed_sell = int(trade_data["executed_sell_amount"])
+        sell_price = Fraction(int(trade_data["sell_token_price"]), 10**18)
+        volume = math.floor(executed_sell * sell_price)
+    return volume
 
 def compute_score(trade_data) -> int:
     limit_sell = int(trade_data["limit_sell_amount"])

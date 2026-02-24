@@ -8,6 +8,7 @@ class Trade:
     id: str
     sell_token: str
     buy_token: str
+    volume: int
     score: int
 
 
