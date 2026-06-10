@@ -14,6 +14,29 @@ At the moment, the data fetching can take 1 minute the first time it is run. Dat
 
 If you have git-lfs installed, a set of auctions should be automatically downloaded with the repo. Otherwise, you can download a set of auctions from the release page. In this way you can run the experiment without access to the database.
 
+## Inspecting a single auction
+
+To inspect a single solver competition in an interactive HTML view, run
+
+```sh
+uv run inspect_auction.py <auction id | settlement tx hash | latest> [--network mainnet]
+```
+
+This fetches the competition data from the [CoW Protocol API](https://api.cow.fi/docs/)
+(no database credentials needed), computes surplus per trade, reruns the auction
+mechanism from `mechanism.py` on surplus-based scores (baseline solutions, fairness
+filtering, winner selection, reference scores), and writes a self-contained HTML file
+which opens in the browser. The view shows a matrix of trades (rows, grouped by
+directed token pair) against solutions (columns, ranked) with winners, baseline
+solutions, and filtered solutions marked, including which trade caused a solution to
+be filtered. Clicking a winner highlights its reference solutions and compares the
+API reference score (score-based) with the locally recomputed one (surplus-based).
+
+Note on scores: ranking in the protocol is by score = surplus + fees, but fees of
+non-executed bids are not available from the API. The view therefore shows the API
+score, the computed surplus, and their difference as implied fees; the local rerun
+of the mechanism uses surplus only.
+
 ## Running the script
 
 

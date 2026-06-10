@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CoW auction inspector</title>
+<style>
+  :root {
+    --winner: #e8f7ee; --winner-strong: #1d8a4a;
+    --filtered: #f3f3f3; --filtered-text: #9a9a9a;
+    --baseline: #8a6d1d; --violation: #c0392b;
+    --reference: #1d5e8a; --border: #ddd;
+  }
+  * { box-sizing: border-box; }
+  body { font: 13px/1.45 system-ui, sans-serif; margin: 0; color: #222; }
+  header { padding: 14px 18px 10px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 17px; margin: 0 0 4px; }
+  header .meta { color: #666; }
+  header a { color: var(--reference); text-decoration: none; }
+  header a:hover { text-decoration: underline; }
+  #legend { padding: 6px 18px; color: #555; font-size: 12px; border-bottom: 1px solid var(--border); }
+  #legend span { margin-right: 14px; white-space: nowrap; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 3px; vertical-align: baseline; }
+  #tablewrap { overflow: auto; max-height: calc(100vh - 130px); }
+  table { border-collapse: separate; border-spacing: 0; }
+  th, td { padding: 4px 9px; border-bottom: 1px solid #eee; border-right: 1px solid #f3f3f3; white-space: nowrap; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  thead th { position: sticky; top: 0; background: #fff; z-index: 3; border-bottom: 2px solid var(--border); vertical-align: bottom; text-align: right; }
+  tbody th, thead th:first-child { position: sticky; left: 0; background: #fff; z-index: 2; text-align: left; font-weight: normal; border-right: 1px solid var(--border); }
+  thead th:first-child { z-index: 4; }
+  tr.pair-row th, tr.pair-row td { background: #fafafa; font-weight: 600; border-top: 1px solid var(--border); }
+  tr.order-row th { padding-left: 24px; color: #555; }
+  tr.summary-row th { color: #555; }
+  tr.summary-row.first th, tr.summary-row.first td { border-top: 2px solid var(--border); }
+  th .solver { font-weight: 600; cursor: pointer; border-bottom: 1px dotted #bbb; }
+  th .solver:hover { border-bottom-style: solid; }
+  th .addr-line { font-weight: normal; font-size: 11px; color: #888; }
+  th .addr-line a { border-bottom: none; }
+  th .badges { font-size: 11px; }
+  tbody th.clickable { cursor: pointer; }
+  tbody th.selected, thead th.selected { outline: 2px solid var(--reference); outline-offset: -2px; }
+  a.addr, a.order { color: inherit; text-decoration: none; border-bottom: 1px dotted #bbb; }
+  a.addr:hover, a.order:hover { border-bottom-style: solid; }
+  .badge { display: inline-block; padding: 0 5px; border-radius: 8px; font-size: 10px; font-weight: 600; margin-left: 4px; }
+  .badge.winner { background: var(--winner-strong); color: #fff; }
+  .badge.local { background: #fff; color: var(--winner-strong); border: 1px solid var(--winner-strong); }
+  .badge.filtered { background: #888; color: #fff; }
+  .badge.filtered-local { background: #fff; color: #888; border: 1px solid #888; }
+  .badge.baseline { background: var(--baseline); color: #fff; }
+  col.winner-col { background: var(--winner); }
+  col.filtered-col { background: var(--filtered); }
+  /* highlight classes below override the base column tints above */
+  col.ref-col { background: #e3eef6; }
+  col.trade-col { background: #fcf3dc; }
+  col.solver-col { background: #f1e6f7; }
+  col.hover-col { background: #f0f4ff; }
+  .filtered-col-text { color: var(--filtered-text); }
+  td.violation { color: var(--violation); font-weight: 600; text-decoration: underline dotted var(--violation); cursor: help; }
+  td.baseline-cell { color: var(--baseline); font-weight: 700; }
+  thead th.clickable { cursor: pointer; }
+  td.empty { color: #ccc; text-align: center; }
+  #popup { position: fixed; right: 16px; top: 90px; width: 380px; max-height: 70vh; overflow: auto; background: #fff;
+           border: 1px solid var(--reference); border-radius: 6px; box-shadow: 0 4px 18px rgba(0,0,0,.15); padding: 12px 14px; z-index: 10; }
+  #popup.hidden { display: none; }
+  #popup h2 { font-size: 14px; margin: 0 0 8px; color: var(--reference); }
+  #popup table { width: 100%; }
+  #popup td, #popup th { padding: 2px 6px; border: none; font-size: 12px; }
+  #popup .close { float: right; cursor: pointer; border: none; background: none; font-size: 14px; color: #888; }
+  #popup .note { color: #777; font-size: 11px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title"></h1>
+  <div class="meta" id="meta"></div>
+</header>
+<div id="legend"></div>
+<div id="tablewrap"><table id="matrix"></table></div>
+<div id="popup" class="hidden"></div>
+<script>
+const DATA = __DATA_JSON__;
+
+const SHORT = (addr, n = 6) => addr.slice(0, 2 + n) + "…" + addr.slice(-4);
+const tokenLabel = (addr) => (DATA.tokens[addr] && DATA.tokens[addr].symbol) || SHORT(addr, 4);
+const pairLabel = (key) => {
+  const [sell, buy] = key.split("|");
+  return tokenLabel(sell) + " → " + tokenLabel(buy);
+};
+function fmtNative(weiStr, digits = 5) {
+  if (weiStr === null || weiStr === undefined) return "?";
+  const value = Number(weiStr) / 1e18;
+  if (value === 0) return "0";
+  const abs = Math.abs(value);
+  if (abs < 1e-6) return value.toExponential(2);
+  return value.toLocaleString("en-US", { maximumFractionDigits: Math.max(digits, -Math.floor(Math.log10(abs)) + 2), minimumFractionDigits: 0 });
+}
+function fmtAmount(atomStr, tokenAddr) {
+  const info = DATA.tokens[tokenAddr];
+  if (!info) return atomStr + " atoms";
+  return (Number(atomStr) / 10 ** info.decimals).toLocaleString("en-US", { maximumFractionDigits: 6 }) + " " + info.symbol;
+}
+const addrLink = (addr) => `<a class="addr" href="${DATA.explorerBase}/address/${addr}" target="_blank">${SHORT(addr)}</a>`;
+const solverLabel = (addr) => DATA.solverNames[addr.toLowerCase()] || SHORT(addr);
+const NAT = DATA.nativeSymbol;
+const A = DATA.analysis;
+const isLocalWinner = (i) => A.winnerIndices.includes(i);
+const isLocalFiltered = (i) => A.filteredIndices.includes(i);
+
+/* header */
+document.getElementById("title").textContent = `Auction ${DATA.auctionId} — ${DATA.network}`;
+document.getElementById("meta").innerHTML = [
+  `blocks ${DATA.auctionStartBlock}–${DATA.auctionDeadlineBlock}`,
+  `${DATA.solutions.length} solutions, ${DATA.pairs.length} directed token pairs, ${Object.keys(DATA.orders).length} orders`,
+  ...DATA.transactionHashes.map((tx) => `settlement <a href="${DATA.explorerBase}/tx/${tx}" target="_blank">${SHORT(tx, 8)}</a>`),
+].join(" · ");
+
+document.getElementById("legend").innerHTML = [
+  `<span><span class="swatch" style="background:var(--winner)"></span>winner (API)</span>`,
+  `<span><span class="badge local">L</span> winner of local surplus-based rerun</span>`,
+  `<span><span class="swatch" style="background:var(--filtered)"></span>filtered out</span>`,
+  `<span><span class="badge baseline">B</span> baseline solution for the pair</span>`,
+  `<span style="color:var(--violation)">red value: below baseline → caused filtering</span>`,
+  `<span>click a winner column for reference solutions</span>`,
+  `<span>click a trade row to compare its solutions</span>`,
+  `<span>click a solver name to highlight their solutions</span>`,
+  `<span>all values in ${NAT} unless stated otherwise</span>`,
+].join("");
+
+/* column order: by API ranking, fallback original order */
+const cols = DATA.solutions.slice().sort((a, b) => (a.ranking ?? 1e9) - (b.ranking ?? 1e9));
+
+const table = document.getElementById("matrix");
+const colgroup = document.createElement("colgroup");
+colgroup.appendChild(document.createElement("col"));
+for (const sol of cols) {
+  const col = document.createElement("col");
+  col.dataset.index = sol.index;
+  if (sol.filteredOutApi || isLocalFiltered(sol.index)) col.classList.add("filtered-col");
+  else if (sol.isWinner) col.classList.add("winner-col");
+  colgroup.appendChild(col);
+}
+table.appendChild(colgroup);
+
+/* solution column headers */
+const thead = document.createElement("thead");
+const headRow = document.createElement("tr");
+headRow.innerHTML = "<th>token pair / order</th>";
+for (const sol of cols) {
+  const th = document.createElement("th");
+  th.dataset.index = sol.index;
+  const badges = [];
+  if (sol.isWinner) badges.push(`<span class="badge winner" title="winner according to the API">W</span>`);
+  if (isLocalWinner(sol.index)) badges.push(`<span class="badge local" title="winner of the local surplus-based rerun">L</span>`);
+  if (sol.filteredOutApi) badges.push(`<span class="badge filtered" title="filtered out according to the API">F</span>`);
+  if (isLocalFiltered(sol.index) && !sol.filteredOutApi) badges.push(`<span class="badge filtered-local" title="filtered by the local surplus-based baseline check (but not by the API)">f</span>`);
+  const baselinePairs = Object.entries(A.baselines).filter(([, b]) => b.solutionIndex === sol.index).map(([k]) => k);
+  if (baselinePairs.length) badges.push(`<span class="badge baseline" title="baseline solution for ${baselinePairs.map(pairLabel).join(", ")}">B</span>`);
+  th.innerHTML = `<div>#${sol.ranking ?? "–"} <span class="solver" title="click to highlight all solutions by ${solverLabel(sol.solver)}">${solverLabel(sol.solver)}</span></div>`
+    + `<div class="addr-line">${addrLink(sol.solver)}</div><div class="badges">${badges.join("")}</div>`;
+  th.querySelector(".solver").addEventListener("click", (event) => {
+    event.stopPropagation();
+    showSolver(sol.solver);
+  });
+  if (sol.isWinner || isLocalWinner(sol.index)) {
+    th.classList.add("clickable");
+    th.title = "click to show reference solutions (best outcome without this solver)";
+    th.addEventListener("click", () => showReference(sol));
+  }
+  headRow.appendChild(th);
+}
+thead.appendChild(headRow);
+table.appendChild(thead);
+
+const tbody = document.createElement("tbody");
+
+function addRow(cls, label, cellFor) {
+  const tr = document.createElement("tr");
+  tr.className = cls;
+  const th = document.createElement("th");
+  th.innerHTML = label;
+  tr.appendChild(th);
+  for (const sol of cols) {
+    const td = document.createElement("td");
+    td.className = "num";
+    if (sol.filteredOutApi || isLocalFiltered(sol.index)) td.classList.add("filtered-col-text");
+    cellFor(sol, td);
+    tr.appendChild(td);
+  }
+  tbody.appendChild(tr);
+  return tr;
+}
+
+/* per-pair groups: aggregated surplus row, then one row per order */
+for (const pair of DATA.pairs) {
+  const key = pair.sellToken + "|" + pair.buyToken;
+  const baseline = A.baselines[key];
+  addRow("pair-row", `${pairLabel(key)} <span style="color:#999;font-weight:normal">(${pair.orderUids.length} order${pair.orderUids.length > 1 ? "s" : ""})</span>`, (sol, td) => {
+    const surplus = sol.pairSurplus[key];
+    if (surplus === undefined) { td.textContent = "·"; td.classList.add("empty"); return; }
+    td.textContent = fmtNative(surplus);
+    if (baseline && baseline.solutionIndex === sol.index) {
+      td.classList.add("baseline-cell");
+      td.title = "baseline solution for this pair (best single-pair solution)";
+    }
+    const violation = (A.violations[sol.index] || []).find((v) => v.pair === key);
+    if (violation) {
+      td.classList.add("violation");
+      const baselineSolver = violation.baselineSolutionIndex !== null ? DATA.solutions[violation.baselineSolutionIndex].solver : "?";
+      td.title = `below baseline for ${pairLabel(key)}: ${fmtNative(violation.surplus)} < ${fmtNative(violation.baselineSurplus)} ${NAT}`
+        + ` (baseline by ${SHORT(baselineSolver)}) → solution filtered out`;
+    }
+  });
+  for (const uid of pair.orderUids) {
+    const order = DATA.orders[uid];
+    const orderLabel = `<a class="order" href="${DATA.cowExplorerOrderBase}${uid}" target="_blank" title="${uid}">${SHORT(uid, 6)}</a>`
+      + (order.found ? ` <span style="color:#999">${order.kind}${order.class === "limit" ? "" : " " + order.class}</span>`
+                     : ` <span style="color:#999" title="order not in the orderbook API – likely a JIT order">JIT?</span>`);
+    const tr = addRow("order-row", orderLabel, (sol, td) => {
+      const trade = sol.trades[uid];
+      if (!trade) { td.textContent = "·"; td.classList.add("empty"); return; }
+      td.textContent = trade.surplus === null ? "?" : fmtNative(trade.surplus);
+      const [sellTok, buyTok] = key.split("|");
+      td.title = `executes ${fmtAmount(trade.sellAmount, sellTok)} → ${fmtAmount(trade.buyAmount, buyTok)}`
+        + (trade.surplus === null ? " (surplus unknown: no order data or native price)" : ` for ${fmtNative(trade.surplus)} ${NAT} surplus`);
+    });
+    const rowHead = tr.querySelector("th");
+    rowHead.classList.add("clickable");
+    rowHead.addEventListener("click", (event) => {
+      if (event.target.closest("a")) return;
+      showTrade(uid, key, rowHead);
+    });
+  }
+}
+
+/* summary block */
+addRow("summary-row first", `score (API, surplus + fees, ${NAT})`, (sol, td) => {
+  td.textContent = fmtNative(sol.scoreApi);
+  td.style.fontWeight = "600";
+});
+addRow("summary-row", `surplus (computed, ${NAT})`, (sol, td) => { td.textContent = fmtNative(sol.surplusTotal); });
+addRow("summary-row", `implied fees (score − surplus, ${NAT})`, (sol, td) => {
+  const hasUnknown = Object.values(sol.trades).some((t) => t.surplus === null);
+  td.textContent = fmtNative(String(Number(sol.scoreApi) - Number(sol.surplusTotal))) + (hasUnknown ? " ⚠" : "");
+  if (hasUnknown) td.title = "some trade surplus unknown – implied fees unreliable";
+});
+addRow("summary-row", `reference score (API, ${NAT})`, (sol, td) => {
+  const ref = sol.referenceScoreApi ?? DATA.referenceScoresApi[sol.solver];
+  if (ref === undefined || ref === null) { td.textContent = "·"; td.classList.add("empty"); return; }
+  td.textContent = fmtNative(ref);
+});
+
+tbody.lastChild.querySelectorAll("th,td").forEach((cell) => (cell.style.borderBottom = "none"));
+table.appendChild(tbody);
+
+/* column hover highlight */
+table.addEventListener("mouseover", (event) => {
+  const cell = event.target.closest("td,th");
+  if (!cell || cell.cellIndex === undefined || cell.cellIndex === 0) return;
+  colgroup.querySelectorAll("col.hover-col").forEach((col) => col.classList.remove("hover-col"));
+  const col = colgroup.children[cell.cellIndex];
+  if (col && !["winner-col", "ref-col", "trade-col", "solver-col"].some((cls) => col.classList.contains(cls))) col.classList.add("hover-col");
+});
+table.addEventListener("mouseleave", () => colgroup.querySelectorAll("col.hover-col").forEach((col) => col.classList.remove("hover-col")));
+
+/* popups and column highlighting */
+const popup = document.getElementById("popup");
+const colIndexOf = (index) => cols.findIndex((c) => c.index === index) + 1;
+let activeKey = null;
+function clearHighlights() {
+  popup.classList.add("hidden");
+  colgroup.querySelectorAll("col.ref-col, col.trade-col, col.solver-col").forEach((col) => col.classList.remove("ref-col", "trade-col", "solver-col"));
+  table.querySelectorAll("th.selected").forEach((th) => th.classList.remove("selected"));
+  activeKey = null;
+}
+function toggleHighlight(key) {
+  const wasActive = activeKey === key;
+  clearHighlights();
+  if (wasActive) return false;
+  activeKey = key;
+  return true;
+}
+function openPopup(title, body) {
+  popup.innerHTML = `<button class="close" title="close">✕</button><h2>${title}</h2>${body}`;
+  popup.querySelector(".close").addEventListener("click", clearHighlights);
+  popup.classList.remove("hidden");
+}
+const colMarks = (sol) => (sol.isWinner ? ` <span class="badge winner">W</span>` : "")
+  + (sol.filteredOutApi || isLocalFiltered(sol.index) ? ` <span class="badge filtered">F</span>` : "");
+
+function showSolver(solver) {
+  if (!toggleHighlight("solver:" + solver)) return;
+  const own = cols.filter((c) => c.solver === solver);
+  for (const sol of own) colgroup.children[colIndexOf(sol.index)].classList.add("solver-col");
+  openPopup(`${solverLabel(solver)}`,
+    `<div class="note">${addrLink(solver)} — ${own.length} solution${own.length > 1 ? "s" : ""} in this auction (highlighted purple):</div>
+     <table>${own.map((sol) => `<tr><td>#${sol.ranking ?? "–"}${colMarks(sol)}</td>
+       <td class="num">score ${fmtNative(sol.scoreApi)}</td><td class="num">surplus ${fmtNative(sol.surplusTotal)} ${NAT}</td></tr>`).join("")}</table>`);
+}
+
+function showTrade(uid, key, rowHead) {
+  if (!toggleHighlight("trade:" + uid)) return;
+  rowHead.classList.add("selected");
+  const [sellTok, buyTok] = key.split("|");
+  const entries = cols.filter((sol) => sol.trades[uid]);
+  for (const sol of entries) colgroup.children[colIndexOf(sol.index)].classList.add("trade-col");
+  entries.sort((a, b) => Number(b.trades[uid].surplus ?? -1) - Number(a.trades[uid].surplus ?? -1));
+  const order = DATA.orders[uid];
+  const orderInfo = order.found
+    ? `${order.kind} order, limit ${fmtAmount(order.limitSell, sellTok)} → ${fmtAmount(order.limitBuy, buyTok)}`
+    : "order not in the orderbook API – likely a JIT order";
+  openPopup(`Trade ${SHORT(uid, 6)} (${pairLabel(key)})`,
+    `<div class="note"><a class="order" href="${DATA.cowExplorerOrderBase}${uid}" target="_blank">view on CoW explorer</a> — ${orderInfo}.
+       Executed in ${entries.length} solution${entries.length > 1 ? "s" : ""} (highlighted yellow), by surplus:</div>
+     <table>${entries.map((sol) => {
+       const trade = sol.trades[uid];
+       return `<tr><td>#${sol.ranking ?? "–"} ${solverLabel(sol.solver)}${colMarks(sol)}</td>
+         <td class="num">${trade.surplus === null ? "?" : fmtNative(trade.surplus) + " " + NAT}</td>
+         <td class="num" style="color:#777">${fmtAmount(trade.sellAmount, sellTok)} → ${fmtAmount(trade.buyAmount, buyTok)}</td></tr>`;
+     }).join("")}</table>`);
+}
+
+function showReference(sol) {
+  if (!toggleHighlight("ref:" + sol.index)) return;
+  const ref = A.references[sol.solver];
+  if (ref) {
+    for (const idx of ref.solutionIndices) {
+      const col = colgroup.children[colIndexOf(idx)];
+      if (col) col.classList.add("ref-col");
+    }
+  }
+  thead.querySelectorAll("th")[colIndexOf(sol.index)].classList.add("selected");
+  const refApi = sol.referenceScoreApi ?? DATA.referenceScoresApi[sol.solver];
+  const rows = [];
+  rows.push(["score of this solution (API)", fmtNative(sol.scoreApi)]);
+  rows.push(["surplus of this solution (computed)", fmtNative(sol.surplusTotal)]);
+  rows.push(["total winning surplus (local rerun)", fmtNative(A.winnersTotal)]);
+  if (refApi !== undefined && refApi !== null) rows.push(["reference score (API, score-based)", fmtNative(refApi)]);
+  if (ref) {
+    rows.push(["reference score (local, surplus-based)", fmtNative(ref.score)]);
+    rows.push(["⇒ surplus-based reward proxy", fmtNative(String(Number(A.winnersTotal) - Number(ref.score)))]);
+  }
+  openPopup(`Reference for ${solverLabel(sol.solver)}`,
+    `<table>${rows.map(([k, v]) => `<tr><th style="text-align:left">${k}</th><td class="num">${v} ${NAT}</td></tr>`).join("")}</table>
+    ${ref && ref.solutionIndices.length
+      ? `<div class="note">Reference solutions (highlighted blue) — best feasible outcome of the local surplus-based rerun without ${solverLabel(sol.solver)}:</div>
+         <table>${ref.solutionIndices.map((idx) => {
+           const refSol = DATA.solutions[idx];
+           return `<tr><td>#${refSol.ranking ?? "–"} ${solverLabel(refSol.solver)}</td><td class="num">${fmtNative(refSol.surplusTotal)} ${NAT}</td></tr>`;
+         }).join("")}</table>`
+      : `<div class="note">No reference solutions: without this solver nothing would have been executed.</div>`}
+    <div class="note">API reference scores are based on score = surplus + fees; the local rerun uses computed surplus only (fees for non-executed bids are not available from the API), so the two can differ.</div>`);
+}
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") clearHighlights(); });
+</script>
+</body>
+</html>
