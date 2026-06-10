@@ -203,6 +203,58 @@ def compute_trade_surplus(
     return score
 
 
+def compute_effective_quote(order: dict | None) -> tuple[int, int] | None:
+    """Effective (sell amount, buy amount) of the order's quote.
+
+    The quote on the order endpoint is given as sell amount, buy amount, and fee
+    amount; the fee is folded into the amounts to make them comparable to
+    executions: for sell orders the buy amount becomes
+    (sell - fee) * buy / sell, for buy orders the sell amount becomes
+    sell + fee. (Volume fees are not corrected for yet.)
+    """
+    if order is None or not order.get("quote"):
+        return None
+    quote = order["quote"]
+    quote_sell = int(quote["sellAmount"])
+    quote_buy = int(quote["buyAmount"])
+    fee = int(quote["feeAmount"])
+    if order["kind"] == "sell":
+        if quote_sell == 0:
+            return None
+        return quote_sell, (quote_sell - fee) * quote_buy // quote_sell
+    return quote_sell + fee, quote_buy
+
+
+def compute_trade_quote_score(
+    order: dict | None,
+    executed_sell: int,
+    executed_buy: int,
+    native_prices: dict[str, int],
+) -> int | None:
+    """Surplus the trade would have had if executed at the quoted price.
+
+    Uses the same fill size as the actual execution, with the counterpart
+    amount taken from the effective quote price; can be negative if the quote
+    is below the limit price.
+    """
+    effective = compute_effective_quote(order)
+    if effective is None:
+        return None
+    effective_sell, effective_buy = effective
+    assert order is not None
+    if order["kind"] == "sell":
+        if effective_sell == 0:
+            return None
+        synthetic_buy = math.floor(
+            Fraction(executed_sell * effective_buy, effective_sell)
+        )
+        return compute_trade_surplus(order, executed_sell, synthetic_buy, native_prices)
+    if effective_buy == 0:
+        return None
+    synthetic_sell = math.ceil(Fraction(executed_buy * effective_sell, effective_buy))
+    return compute_trade_surplus(order, synthetic_sell, executed_buy, native_prices)
+
+
 def pair_key(sell_token: str, buy_token: str) -> str:
     """Serialize a directed token pair into a string key for use in JSON."""
     return f"{sell_token}|{buy_token}"
@@ -210,23 +262,23 @@ def pair_key(sell_token: str, buy_token: str) -> str:
 
 def build_solutions(
     competition: dict, orders: dict[str, dict | None]
-) -> tuple[list[Solution], list[dict[str, int | None]]]:
+) -> tuple[list[Solution], list[dict[str, tuple[int | None, int | None]]]]:
     """Build mechanism.Solution objects with surplus-based scores.
 
     Solution ids are list indices into competition["solutions"]; trades with
     unknown surplus (JIT orders, missing prices) enter with score 0. The second
-    return value contains the raw surplus per order uid for each solution, with
-    None marking unknown surplus.
+    return value contains (surplus, quote score) per order uid for each
+    solution, with None marking unknown values.
     """
     native_prices = {
         token.lower(): int(price)
         for token, price in competition["auction"]["prices"].items()
     }
     solutions = []
-    surpluses: list[dict[str, int | None]] = []
+    surpluses: list[dict[str, tuple[int | None, int | None]]] = []
     for index, solution_data in enumerate(competition["solutions"]):
         trades = []
-        trade_surpluses: dict[str, int | None] = {}
+        trade_surpluses: dict[str, tuple[int | None, int | None]] = {}
         for order_execution in solution_data["orders"]:
             uid = order_execution["id"]
             surplus = compute_trade_surplus(
@@ -235,7 +287,13 @@ def build_solutions(
                 int(order_execution["buyAmount"]),
                 native_prices,
             )
-            trade_surpluses[uid] = surplus
+            quote_score = compute_trade_quote_score(
+                orders[uid],
+                int(order_execution["sellAmount"]),
+                int(order_execution["buyAmount"]),
+                native_prices,
+            )
+            trade_surpluses[uid] = (surplus, quote_score)
             trades.append(
                 Trade(
                     id=uid,
@@ -331,7 +389,7 @@ def assemble_view_data(
     competition: dict,
     orders: dict[str, dict | None],
     solutions: list[Solution],
-    surpluses: list[dict[str, int | None]],
+    surpluses: list[dict[str, tuple[int | None, int | None]]],
     analysis: dict,
     token_info: dict[str, dict],
     solver_names: dict[str, str],
@@ -350,11 +408,12 @@ def assemble_view_data(
         solution = solutions[index]
         trades = {}
         for order_execution, trade in zip(solution_data["orders"], solution.trades):
-            surplus = surpluses[index][trade.id]
+            surplus, quote_score = surpluses[index][trade.id]
             trades[trade.id] = {
                 "sellAmount": order_execution["sellAmount"],
                 "buyAmount": order_execution["buyAmount"],
                 "surplus": str(surplus) if surplus is not None else None,
+                "quoteSurplus": str(quote_score) if quote_score is not None else None,
             }
         pair_surplus = {
             pair_key(*token_pair): str(score)
@@ -397,22 +456,23 @@ def assemble_view_data(
     for pair in pairs:
         del pair["_total"]
 
-    order_views = {
-        uid: (
-            {
-                "found": True,
-                "kind": order["kind"],
-                "class": order["class"],
-                "limitSell": order["sellAmount"],
-                "limitBuy": order["buyAmount"],
-                "sellToken": order["sellToken"].lower(),
-                "buyToken": order["buyToken"].lower(),
-            }
-            if order is not None
-            else {"found": False}
-        )
-        for uid, order in orders.items()
-    }
+    order_views = {}
+    for uid, order in orders.items():
+        if order is None:
+            order_views[uid] = {"found": False}
+            continue
+        effective_quote = compute_effective_quote(order)
+        order_views[uid] = {
+            "found": True,
+            "kind": order["kind"],
+            "class": order["class"],
+            "limitSell": order["sellAmount"],
+            "limitBuy": order["buyAmount"],
+            "sellToken": order["sellToken"].lower(),
+            "buyToken": order["buyToken"].lower(),
+            "quoteSell": str(effective_quote[0]) if effective_quote else None,
+            "quoteBuy": str(effective_quote[1]) if effective_quote else None,
+        }
 
     return {
         "network": network,

@@ -104,7 +104,9 @@
   <div class="section-body">
     <p class="caption">One bar per solution, length = score (API). Colored segments: computed surplus per token pair; gray segment: implied fees.
       Black tick: baseline level for the pair (<span style="color:var(--violation)">red</span> if the segment falls short → filtered).
-      Blue marker on a winner: the gap from the marker to the end of the bar is its reward basis (winners total − reference score, uncapped). Click a bar to locate the solution in the table.</p>
+      Blue marker on a winner: the gap from the marker to the end of the bar is its reward basis (winners total − reference score, uncapped).
+      <span style="color:#b07aa1">Purple dashed tick</span>: quote level — the surplus the solution's trades would give if executed at their (fee-adjusted) quoted prices.
+      Click a bar to locate the solution in the table.</p>
     <div id="ladder"></div>
   </div>
 </details>
@@ -267,7 +269,10 @@ function buildLadder() {
   const labelW = 190, rowH = 17, barH = 10, valueW = 90;
   const width = Math.min(Math.max(document.body.clientWidth - 60, 700), 1400);
   const barSpan = width - labelW - valueW;
-  const maxLen = Math.max(...allCols.map((sol) => Math.max(Number(sol.scoreApi), Number(sol.surplusTotal))), 1);
+  const quoteSum = (sol) => Object.values(sol.trades)
+    .reduce((sum, t) => sum + (t.quoteSurplus !== null ? Number(t.quoteSurplus) : 0), 0);
+  const maxLen = Math.max(...allCols.map((sol) =>
+    Math.max(Number(sol.scoreApi), Number(sol.surplusTotal), quoteSum(sol))), 1);
   const scale = (v) => (v / maxLen) * barSpan;
   const winnersTotalApi = allCols.filter((sol) => sol.isWinner).reduce((sum, sol) => sum + Number(sol.scoreApi), 0);
   const svg = svgEl("svg", { width, height: allCols.length * rowH + 6 });
@@ -302,6 +307,17 @@ function buildLadder() {
     if (fees > 0) {
       const segment = svgEl("rect", { x: labelW + scale(cursor), y, width: scale(fees), height: barH, fill: "#c9c9c9" }, group);
       svgTitle(segment, `implied fees: ${fmtNative(String(fees))} ${NAT}`);
+    }
+    // quote level: surplus if all trades were executed at their quoted prices
+    const quoteParts = Object.values(sol.trades).map((t) => t.quoteSurplus).filter((q) => q !== null);
+    if (quoteParts.length) {
+      const quoteSum = quoteParts.reduce((sum, q) => sum + Number(q), 0);
+      const partial = quoteParts.length < Object.keys(sol.trades).length;
+      const marker = svgEl("line", { x1: labelW + scale(Math.max(quoteSum, 0)), x2: labelW + scale(Math.max(quoteSum, 0)),
+        y1: y - 3, y2: y + barH + 3, stroke: "#b07aa1", "stroke-width": 2, "stroke-dasharray": "2,2" }, group);
+      svgTitle(marker, `quote level: ${fmtNative(String(quoteSum))} ${NAT} surplus if executed at the quoted prices`
+        + (quoteSum < 0 ? " (negative: quote below limit price, marker clamped to 0)" : "")
+        + (partial ? " (no quote available for some trades)" : ""));
     }
     // reward marker for winners: reference scores are totals over all winners,
     // so the reward (total - reference) is drawn from the end of the bar
@@ -681,7 +697,14 @@ function showSolver(solver) {
 function stripPlot(entries, uid) {
   const values = entries.filter((sol) => sol.trades[uid].surplus !== null)
     .map((sol) => ({ sol, value: Number(sol.trades[uid].surplus) }));
-  const max = Math.max(...values.map((e) => e.value), 0);
+  // quote level: take the execution with the largest fill as representative
+  const withQuote = entries.filter((sol) => sol.trades[uid].quoteSurplus !== null);
+  const quote = withQuote.length
+    ? Number(withQuote.reduce((a, b) =>
+        Number(b.trades[uid].sellAmount) > Number(a.trades[uid].sellAmount) ? b : a).trades[uid].quoteSurplus)
+    : null;
+  // the axis spans executions AND the quote, so a quote better than all executions sits beyond the dots
+  const max = Math.max(...values.map((e) => e.value), quote ?? 0, 0);
   if (values.length < 2 || max <= 0) return "";
   const width = 370, pad = 10;
   const buckets = {};
@@ -696,14 +719,25 @@ function stripPlot(entries, uid) {
   const axisY = 12 + maxLevel * 9;
   const height = axisY + 16;
   const dotColor = (sol) => sol.isWinner ? "var(--winner-strong)" : isFiltered(sol) ? "#aaa" : "#4e79a7";
-  return `<svg width="${width}" height="${height}" style="margin-top:6px">
+  let quoteMarker = "";
+  if (quote !== null) {
+    const x = pad + (Math.max(quote, 0) / max) * (width - 2 * pad);
+    quoteMarker = `<line x1="${x}" y1="${axisY - 10 - (maxLevel - 1) * 9}" x2="${x}" y2="${axisY + 4}"
+        stroke="#b07aa1" stroke-width="2" stroke-dasharray="2,2">
+        <title>quote level: ${fmtNative(String(quote))} ${NAT}${quote < 0 ? " (negative: quote below limit price, marker clamped to 0)" : ""}</title></line>
+      <text x="${Math.min(Math.max(x, 18), width - 18)}" y="${axisY - 12 - (maxLevel - 1) * 9}" text-anchor="middle" style="font-size:10px;fill:#b07aa1">quote</text>`;
+  }
+  return `<svg width="${width}" height="${height + (quoteMarker ? 12 : 0)}" style="margin-top:6px">
+    <g transform="translate(0,${quoteMarker ? 12 : 0})">
     <line x1="${pad}" y1="${axisY}" x2="${width - pad}" y2="${axisY}" stroke="#ccc"/>
     <line x1="${pad}" y1="${axisY - 4}" x2="${pad}" y2="${axisY + 4}" stroke="#888"/>
     <text x="${pad}" y="${axisY + 13}" style="font-size:10px;fill:#888">0 (limit price)</text>
     <text x="${width - pad}" y="${axisY + 13}" text-anchor="end" style="font-size:10px;fill:#888">${fmtNative(String(max))} ${NAT}</text>
+    ${quoteMarker}
     ${dots.map(({ sol, value, x, level }) =>
       `<circle cx="${x}" cy="${axisY - 5 - (level - 1) * 9}" r="3.6" fill="${dotColor(sol)}" fill-opacity="0.85">
          <title>#${sol.ranking ?? "–"} ${solverLabel(sol.solver)}: ${fmtNative(String(value))} ${NAT}</title></circle>`).join("")}
+    </g>
   </svg>`;
 }
 
@@ -720,6 +754,7 @@ function showTrade(uid, key, rowHead) {
   const order = DATA.orders[uid];
   const orderInfo = order.found
     ? `${order.kind} order, limit ${fmtAmount(order.limitSell, sellTok)} → ${fmtAmount(order.limitBuy, buyTok)}`
+      + (order.quoteSell ? `, quoted ${fmtAmount(order.quoteSell, sellTok)} → ${fmtAmount(order.quoteBuy, buyTok)} (fee-adjusted)` : "")
     : "order not in the orderbook API – likely a JIT order";
   openPopup(`Trade ${SHORT(uid, 6)} (${pairLabel(key)})`,
     `<div class="note"><a class="order" href="${DATA.cowExplorerOrderBase}${uid}" target="_blank">view on CoW explorer</a> — ${orderInfo}.
