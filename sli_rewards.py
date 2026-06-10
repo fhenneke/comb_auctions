@@ -17,6 +17,9 @@ from mechanism import (
 auction_start = 12187189 - 50000
 auction_end = 12187189
 
+# auction_start = 12217089
+# auction_end = 12264319
+
 solutions_batch = fetch_auctions(auction_start, auction_end)
 
 reward_cap_upper = 10**24
