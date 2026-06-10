@@ -136,37 +136,40 @@ def fetch_solver_names(chain_id: int) -> dict[str, str]:
     """Fetch submission address -> solver display name from the CoW CMS.
 
     Uses the same data source as the CoW explorer ("solved by" on order pages);
-    returns an empty dict on failure.
+    returns an empty dict on failure (with a warning, addresses are shown instead).
     """
-    names: dict[str, str] = {}
-    page = 1
-    try:
-        while True:
-            response = requests.get(
-                SOLVER_NETWORKS_URL,
-                params={
-                    "filters[network][chainId][$eq]": str(chain_id),
-                    "populate[solver]": "*",
-                    "pagination[pageSize]": "100",
-                    "pagination[page]": str(page),
-                },
-                timeout=REQUEST_TIMEOUT,
-            )
-            response.raise_for_status()
-            result = response.json()
-            for entry in result["data"]:
-                attributes = entry["attributes"]
-                solver = attributes["solver"]["data"]
-                if solver is not None:
-                    names[attributes["address"].lower()] = solver["attributes"][
-                        "displayName"
-                    ]
-            if page >= result["meta"]["pagination"]["pageCount"]:
-                break
-            page += 1
-    except (requests.RequestException, KeyError, ValueError):
-        return {}
-    return names
+    for _ in range(2):
+        names: dict[str, str] = {}
+        page = 1
+        try:
+            while True:
+                response = requests.get(
+                    SOLVER_NETWORKS_URL,
+                    params={
+                        "filters[network][chainId][$eq]": str(chain_id),
+                        "populate[solver]": "*",
+                        "pagination[pageSize]": "100",
+                        "pagination[page]": str(page),
+                    },
+                    timeout=REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                result = response.json()
+                for entry in result["data"]:
+                    attributes = entry["attributes"]
+                    solver = attributes["solver"]["data"]
+                    if solver is not None:
+                        names[attributes["address"].lower()] = solver["attributes"][
+                            "displayName"
+                        ]
+                if page >= result["meta"]["pagination"]["pageCount"]:
+                    break
+                page += 1
+            return names
+        except (requests.RequestException, KeyError, ValueError) as error:
+            last_error = error
+    print(f"warning: could not fetch solver names ({last_error})")
+    return {}
 
 
 def compute_trade_surplus(
