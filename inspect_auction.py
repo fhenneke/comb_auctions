@@ -1,7 +1,7 @@
 """Inspect a solver competition and visualize it in a small HTML UI.
 
 Fetches competition data from the CoW Protocol API (by auction id or transaction
-hash), computes surplus per trade analogously to data_fetching.compute_score,
+hash), computes surplus per trade via mechanism.compute_surplus_score,
 reruns the combinatorial auction mechanism from mechanism.py on surplus-based
 scores (baseline computation, fairness filtering, winner selection, reference
 scores), and renders everything into a self-contained interactive HTML file.
@@ -18,7 +18,7 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import requests
 
@@ -29,54 +29,65 @@ from mechanism import (
     Trade,
     aggregate_scores,
     compute_baseline_solutions,
+    compute_surplus_score,
     compute_total_score,
 )
 
 API_BASE = "https://api.cow.fi/{network}/api"
+COW_EXPLORER_BASE = "https://explorer.cow.fi/"
 TOKEN_LIST_URL = "https://files.cow.fi/tokens/CowSwap.json"
 SOLVER_NETWORKS_URL = "https://cms.cow.fi/api/solver-networks"
+BLOCKSCOUT_TOKEN_URL = "https://{slug}.blockscout.com/api/v2/tokens/{address}"
+CHAIN_REGISTRY_URL = "https://chainid.network/chains.json"
 NATIVE_TOKEN_ADDRESS = "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 REQUEST_TIMEOUT = 30
 
 NETWORKS: dict[str, dict[str, Any]] = {
     "mainnet": {
         "chain_id": 1,
+        "blockscout": "eth",
         "explorer": "https://etherscan.io",
         "cow_explorer_prefix": "",
         "native_symbol": "ETH",
     },
     "xdai": {
         "chain_id": 100,
+        "blockscout": "gnosis",
         "explorer": "https://gnosisscan.io",
         "cow_explorer_prefix": "gc/",
         "native_symbol": "xDAI",
     },
     "arbitrum_one": {
         "chain_id": 42161,
+        "blockscout": "arbitrum",
         "explorer": "https://arbiscan.io",
         "cow_explorer_prefix": "arb1/",
         "native_symbol": "ETH",
     },
     "base": {
         "chain_id": 8453,
+        "blockscout": "base",
         "explorer": "https://basescan.org",
         "cow_explorer_prefix": "base/",
         "native_symbol": "ETH",
     },
     "polygon": {
         "chain_id": 137,
+        "blockscout": "polygon",
         "explorer": "https://polygonscan.com",
         "cow_explorer_prefix": "pol/",
         "native_symbol": "POL",
     },
     "avalanche": {
         "chain_id": 43114,
+        "blockscout": None,
         "explorer": "https://snowtrace.io",
         "cow_explorer_prefix": "avax/",
         "native_symbol": "AVAX",
     },
     "sepolia": {
         "chain_id": 11155111,
+        "blockscout": "eth-sepolia",
         "explorer": "https://sepolia.etherscan.io",
         "cow_explorer_prefix": "sepolia/",
         "native_symbol": "ETH",
@@ -84,15 +95,20 @@ NETWORKS: dict[str, dict[str, Any]] = {
 }
 
 
-def fetch_competition(network: str, reference: str) -> dict:
+def fetch_competition(network: str, reference: str) -> dict[str, Any]:
     """Fetch competition data by auction id, settlement tx hash, or 'latest'."""
     base = API_BASE.format(network=network) + "/v2/solver_competition"
     if reference.startswith("0x") and len(reference) == 66:
         url = f"{base}/by_tx_hash/{reference}"
     elif reference == "latest":
         url = f"{base}/latest"
+    elif reference.isdigit():
+        url = f"{base}/{reference}"
     else:
-        url = f"{base}/{int(reference)}"
+        raise ValueError(
+            f"invalid reference {reference!r}: expected a transaction hash"
+            " (0x…, 66 characters), an auction id, or 'latest'"
+        )
     response = requests.get(url, timeout=REQUEST_TIMEOUT)
     response.raise_for_status()
     return response.json()
@@ -130,6 +146,121 @@ def fetch_token_info(chain_id: int) -> dict[str, dict]:
         for token in tokens
         if token["chainId"] == chain_id
     }
+
+
+def _decode_eth_call_string(hex_result: str) -> str | None:
+    """Decode a string returned by eth_call (ABI string or legacy bytes32)."""
+    raw = bytes.fromhex(hex_result.removeprefix("0x"))
+    if not raw:
+        return None
+    try:
+        if len(raw) >= 64:
+            offset = int.from_bytes(raw[:32])
+            length = int.from_bytes(raw[offset : offset + 32])
+            value = raw[offset + 32 : offset + 32 + length]
+        else:
+            value = raw.rstrip(b"\x00")
+        return value.decode("utf-8", errors="replace") or None
+    except (IndexError, ValueError):
+        return None
+
+
+def _fetch_tokens_via_rpc(chain_id: int, addresses: list[str]) -> dict[str, dict]:
+    """Fetch token symbol/decimals on-chain via a public RPC.
+
+    The RPC endpoint is discovered through the chainid.network registry, so no
+    per-network RPC configuration is needed; unresolved tokens are omitted.
+    """
+    symbol_selector, decimals_selector = "0x95d89b41", "0x313ce567"
+
+    def eth_call(rpc: str, to: str, data: str) -> str | None:
+        response = requests.post(
+            rpc,
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "eth_call",
+                "params": [{"to": to, "data": data}, "latest"],
+            },
+            timeout=REQUEST_TIMEOUT,
+        )
+        response.raise_for_status()
+        return response.json().get("result")
+
+    try:
+        chains = requests.get(CHAIN_REGISTRY_URL, timeout=REQUEST_TIMEOUT).json()
+        rpcs = [
+            url
+            for chain in chains
+            if chain["chainId"] == chain_id
+            for url in chain["rpc"]
+            if url.startswith("https://") and "${" not in url
+        ]
+    except (requests.RequestException, KeyError, ValueError):
+        return {}
+
+    found: dict[str, dict] = {}
+    for rpc in rpcs:
+        try:
+            for address in addresses:
+                if address in found:
+                    continue
+                symbol_hex = eth_call(rpc, address, symbol_selector)
+                decimals_hex = eth_call(rpc, address, decimals_selector)
+                if not symbol_hex or not decimals_hex:
+                    continue
+                symbol = _decode_eth_call_string(symbol_hex)
+                decimals = int(decimals_hex, 16)
+                if symbol is not None and 0 <= decimals <= 77:
+                    found[address] = {"symbol": symbol, "decimals": decimals}
+            if len(found) == len(addresses):
+                return found
+        except (requests.RequestException, ValueError):
+            continue  # try the next public RPC
+    return found
+
+
+def fetch_missing_token_info(
+    network_config: dict[str, Any], addresses: list[str]
+) -> dict[str, dict]:
+    """Fetch symbol/decimals for tokens missing from the CoW token list.
+
+    Tries the Blockscout explorer API first (if the network has an instance),
+    then falls back to on-chain lookups via a public RPC. Tokens that cannot
+    be resolved are omitted and the viewer shows raw atom amounts for them.
+    """
+    found: dict[str, dict] = {}
+    slug = network_config["blockscout"]
+    if slug is not None:
+
+        def fetch_one(address: str) -> dict | None:
+            try:
+                response = requests.get(
+                    BLOCKSCOUT_TOKEN_URL.format(slug=slug, address=address),
+                    timeout=REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                token = response.json()
+                return {
+                    "symbol": token["symbol"],
+                    "decimals": int(token["decimals"]),
+                }
+            except (requests.RequestException, KeyError, TypeError, ValueError):
+                return None
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = executor.map(fetch_one, addresses)
+        found = {
+            address: info for address, info in zip(addresses, results) if info
+        }
+
+    unresolved = [address for address in addresses if address not in found]
+    if unresolved:
+        found |= _fetch_tokens_via_rpc(network_config["chain_id"], unresolved)
+        unresolved = [address for address in addresses if address not in found]
+    if unresolved:
+        print(f"warning: no token info found for {', '.join(unresolved)}")
+    return found
 
 
 def fetch_solver_names(chain_id: int) -> dict[str, str]:
@@ -180,7 +311,7 @@ def compute_trade_surplus(
 ) -> int | None:
     """Compute the surplus of a trade in atoms of the native token.
 
-    Mirrors data_fetching.compute_score, with order data and native prices
+    Applies mechanism.compute_surplus_score to order data and native prices
     coming from the API instead of the database. Returns None if the order is
     unknown (JIT order) or no native price is available for the buy token.
     """
@@ -189,18 +320,14 @@ def compute_trade_surplus(
     buy_token_price = native_prices.get(order["buyToken"].lower())
     if buy_token_price is None:
         return None
-    limit_sell = int(order["sellAmount"])
-    limit_buy = int(order["buyAmount"])
-    buy_price = Fraction(buy_token_price, 10**18)
-    if order["kind"] == "sell":
-        partial_limit_buy = math.ceil(Fraction(limit_buy * executed_sell, limit_sell))
-        surplus = executed_buy - partial_limit_buy
-        score = math.floor(surplus * buy_price)
-    else:
-        partial_limit_sell = math.floor(Fraction(limit_sell * executed_buy, limit_buy))
-        surplus = partial_limit_sell - executed_sell
-        score = math.floor(surplus * Fraction(limit_buy, limit_sell) * buy_price)
-    return score
+    return compute_surplus_score(
+        kind=order["kind"],
+        limit_sell=int(order["sellAmount"]),
+        limit_buy=int(order["buyAmount"]),
+        executed_sell=executed_sell,
+        executed_buy=executed_buy,
+        buy_token_price=buy_token_price,
+    )
 
 
 def compute_effective_quote(order: dict | None) -> tuple[int, int] | None:
@@ -260,25 +387,31 @@ def pair_key(sell_token: str, buy_token: str) -> str:
     return f"{sell_token}|{buy_token}"
 
 
+class TradeScores(NamedTuple):
+    """Surplus and quote-based score of a trade; None marks unknown values."""
+
+    surplus: int | None
+    quote_score: int | None
+
+
 def build_solutions(
-    competition: dict, orders: dict[str, dict | None]
-) -> tuple[list[Solution], list[dict[str, tuple[int | None, int | None]]]]:
+    competition: dict[str, Any], orders: dict[str, dict | None]
+) -> tuple[list[Solution], list[dict[str, TradeScores]]]:
     """Build mechanism.Solution objects with surplus-based scores.
 
     Solution ids are list indices into competition["solutions"]; trades with
     unknown surplus (JIT orders, missing prices) enter with score 0. The second
-    return value contains (surplus, quote score) per order uid for each
-    solution, with None marking unknown values.
+    return value contains the trade scores per order uid for each solution.
     """
     native_prices = {
         token.lower(): int(price)
         for token, price in competition["auction"]["prices"].items()
     }
     solutions = []
-    surpluses: list[dict[str, tuple[int | None, int | None]]] = []
+    surpluses: list[dict[str, TradeScores]] = []
     for index, solution_data in enumerate(competition["solutions"]):
         trades = []
-        trade_surpluses: dict[str, tuple[int | None, int | None]] = {}
+        trade_surpluses: dict[str, TradeScores] = {}
         for order_execution in solution_data["orders"]:
             uid = order_execution["id"]
             surplus = compute_trade_surplus(
@@ -293,7 +426,7 @@ def build_solutions(
                 int(order_execution["buyAmount"]),
                 native_prices,
             )
-            trade_surpluses[uid] = (surplus, quote_score)
+            trade_surpluses[uid] = TradeScores(surplus, quote_score)
             trades.append(
                 Trade(
                     id=uid,
@@ -314,7 +447,7 @@ def build_solutions(
     return solutions, surpluses
 
 
-def analyze_mechanism(solutions: list[Solution]) -> dict:
+def analyze_mechanism(solutions: list[Solution]) -> dict[str, Any]:
     """Rerun the auction mechanism on surplus-based scores.
 
     Uses the mechanism currently deployed for the combinatorial auction:
@@ -338,7 +471,7 @@ def analyze_mechanism(solutions: list[Solution]) -> dict:
     }
 
     # for solutions removed by the baseline filter, find the violating pairs
-    violations: dict[str, list[dict]] = {}
+    violations: dict[int, list[dict]] = {}
     for solution in solutions:
         if solution.id in filtered_ids:
             continue
@@ -357,7 +490,7 @@ def analyze_mechanism(solutions: list[Solution]) -> dict:
                         ),
                     }
                 )
-        violations[solution.id] = solution_violations
+        violations[int(solution.id)] = solution_violations
 
     references = {}
     for solver in {winner.solver for winner in winners}:
@@ -377,25 +510,30 @@ def analyze_mechanism(solutions: list[Solution]) -> dict:
             for solution in solutions
             if solution.id not in filtered_ids
         ),
-        "violations": {int(key): value for key, value in violations.items()},
+        "violations": violations,
         "winnerIndices": [int(winner.id) for winner in winners],
         "winnersTotal": str(winners_total),
         "references": references,
     }
 
 
+def opt_str(value: int | None) -> str | None:
+    """Serialize an optional big integer for JSON (None stays None)."""
+    return str(value) if value is not None else None
+
+
 def assemble_view_data(
     network: str,
-    competition: dict,
+    competition: dict[str, Any],
     orders: dict[str, dict | None],
     solutions: list[Solution],
-    surpluses: list[dict[str, tuple[int | None, int | None]]],
-    analysis: dict,
+    surpluses: list[dict[str, TradeScores]],
+    analysis: dict[str, Any],
     token_info: dict[str, dict],
     solver_names: dict[str, str],
-) -> dict:
+) -> dict[str, Any]:
     """Assemble the JSON object embedded into the HTML template."""
-    network_config = NETWORKS.get(network, NETWORKS["mainnet"])
+    network_config = NETWORKS[network]
     token_info = token_info | {
         NATIVE_TOKEN_ADDRESS: {
             "symbol": network_config["native_symbol"],
@@ -408,12 +546,12 @@ def assemble_view_data(
         solution = solutions[index]
         trades = {}
         for order_execution, trade in zip(solution_data["orders"], solution.trades):
-            surplus, quote_score = surpluses[index][trade.id]
+            trade_scores = surpluses[index][trade.id]
             trades[trade.id] = {
                 "sellAmount": order_execution["sellAmount"],
                 "buyAmount": order_execution["buyAmount"],
-                "surplus": str(surplus) if surplus is not None else None,
-                "quoteSurplus": str(quote_score) if quote_score is not None else None,
+                "surplus": opt_str(trade_scores.surplus),
+                "quoteSurplus": opt_str(trade_scores.quote_score),
             }
         pair_surplus = {
             pair_key(*token_pair): str(score)
@@ -443,6 +581,7 @@ def assemble_view_data(
             pair = pair_orders.setdefault(
                 key,
                 {
+                    "key": key,
                     "sellToken": trade.sell_token,
                     "buyToken": trade.buy_token,
                     "orderUids": [],
@@ -456,7 +595,7 @@ def assemble_view_data(
     for pair in pairs:
         del pair["_total"]
 
-    order_views = {}
+    order_views: dict[str, dict[str, Any]] = {}
     for uid, order in orders.items():
         if order is None:
             order_views[uid] = {"found": False}
@@ -470,15 +609,15 @@ def assemble_view_data(
             "limitBuy": order["buyAmount"],
             "sellToken": order["sellToken"].lower(),
             "buyToken": order["buyToken"].lower(),
-            "quoteSell": str(effective_quote[0]) if effective_quote else None,
-            "quoteBuy": str(effective_quote[1]) if effective_quote else None,
+            "quoteSell": opt_str(effective_quote[0]) if effective_quote else None,
+            "quoteBuy": opt_str(effective_quote[1]) if effective_quote else None,
         }
 
     return {
         "network": network,
         "nativeSymbol": network_config["native_symbol"],
         "explorerBase": network_config["explorer"],
-        "cowExplorerOrderBase": "https://explorer.cow.fi/"
+        "cowExplorerOrderBase": COW_EXPLORER_BASE
         + network_config["cow_explorer_prefix"]
         + "orders/",
         "auctionId": competition["auctionId"],
@@ -486,6 +625,10 @@ def assemble_view_data(
         "auctionDeadlineBlock": competition.get("auctionDeadlineBlock"),
         "transactionHashes": competition.get("transactionHashes", []),
         "referenceScoresApi": competition.get("referenceScores", {}),
+        "nativePrices": {
+            token.lower(): str(price)
+            for token, price in competition["auction"]["prices"].items()
+        },
         "tokens": token_info,
         "solverNames": solver_names,
         "orders": order_views,
@@ -500,7 +643,10 @@ def render_html(view_data: dict) -> str:
     template = (Path(__file__).parent / "viewer_template.html").read_text(
         encoding="utf-8"
     )
-    return template.replace("__DATA_JSON__", json.dumps(view_data))
+    # escape "</" so external strings (token symbols etc.) cannot terminate the
+    # script tag the data is embedded in
+    data_json = json.dumps(view_data).replace("</", r"<\/")
+    return template.replace("__DATA_JSON__", data_json)
 
 
 def print_summary(view_data: dict) -> None:
@@ -525,8 +671,9 @@ def print_summary(view_data: dict) -> None:
         solver = view_data["solverNames"].get(
             solution["solver"].lower(), solution["solver"][:10] + "…"
         )
+        ranking = "–" if solution["ranking"] is None else solution["ranking"]
         print(
-            f"  #{solution['ranking']:>2} {solver:<20.20} "
+            f"  #{ranking:>2} {solver:<20.20} "
             f"score {score_eth:.6f} surplus {surplus_eth:.6f} {' '.join(marks)}"
         )
 
@@ -541,7 +688,8 @@ def main() -> None:
     parser.add_argument(
         "--network",
         default="mainnet",
-        help=f"network slug of the CoW API ({', '.join(NETWORKS)})",
+        choices=list(NETWORKS),
+        help="network slug of the CoW API",
     )
     parser.add_argument("--output", help="output HTML file path")
     parser.add_argument(
@@ -551,7 +699,7 @@ def main() -> None:
 
     try:
         competition = fetch_competition(args.network, args.reference)
-    except requests.HTTPError as error:
+    except (requests.HTTPError, ValueError) as error:
         parser.error(f"could not fetch competition data: {error}")
     order_uids = list(
         {
@@ -561,8 +709,18 @@ def main() -> None:
         }
     )
     orders = fetch_orders(args.network, order_uids)
-    chain_id = NETWORKS.get(args.network, NETWORKS["mainnet"])["chain_id"]
+    chain_id = NETWORKS[args.network]["chain_id"]
     token_info = fetch_token_info(chain_id)
+    traded_tokens = {
+        order_execution[field].lower()
+        for solution_data in competition["solutions"]
+        for order_execution in solution_data["orders"]
+        for field in ("sellToken", "buyToken")
+    }
+    # the native token sentinel gets its info in assemble_view_data
+    missing_tokens = sorted(traded_tokens - set(token_info) - {NATIVE_TOKEN_ADDRESS})
+    if missing_tokens:
+        token_info |= fetch_missing_token_info(NETWORKS[args.network], missing_tokens)
     solver_names = fetch_solver_names(chain_id)
 
     solutions, surpluses = build_solutions(competition, orders)

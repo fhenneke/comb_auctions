@@ -1,6 +1,8 @@
 import itertools
+import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from fractions import Fraction
 
 
 @dataclass(frozen=True)
@@ -25,6 +27,31 @@ def get_orders(solutions: list[Solution]):
 
 def compute_total_score(solutions: list[Solution]) -> int:
     return sum(solution.score for solution in solutions)
+
+
+def compute_surplus_score(
+    kind: str,
+    limit_sell: int,
+    limit_buy: int,
+    executed_sell: int,
+    executed_buy: int,
+    buy_token_price: int,
+) -> int:
+    """Compute the score of a trade in atoms of the native token.
+
+    The score is the surplus of the trade over its (fill-proportional) limit
+    price, converted to the native token using the buy token price; for buy
+    orders the surplus accrues in the sell token and is converted to the buy
+    token at the limit price first.
+    """
+    buy_price = Fraction(buy_token_price, 10**18)
+    if kind == "sell":
+        partial_limit_buy = math.ceil(Fraction(limit_buy * executed_sell, limit_sell))
+        surplus = executed_buy - partial_limit_buy
+        return math.floor(surplus * buy_price)
+    partial_limit_sell = math.floor(Fraction(limit_sell * executed_buy, limit_buy))
+    surplus = partial_limit_sell - executed_sell
+    return math.floor(surplus * Fraction(limit_buy, limit_sell) * buy_price)
 
 
 def aggregate_scores(solution: Solution) -> dict[tuple[str, str], int]:

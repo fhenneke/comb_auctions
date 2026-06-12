@@ -60,6 +60,7 @@
   th .addr-line { font-weight: normal; font-size: 11px; color: #888; }
   th .addr-line a { border-bottom: none; }
   th .badges { font-size: 11px; }
+  thead th.winner-head { box-shadow: inset 0 3px 0 var(--winner-strong); }
   tbody th.clickable { cursor: pointer; }
   tbody th.selected, thead th.selected { outline: 2px solid var(--reference); outline-offset: -2px; }
   a.addr, a.order { color: inherit; text-decoration: none; border-bottom: 1px dotted #bbb; }
@@ -103,10 +104,12 @@
   <summary>score ladder</summary>
   <div class="section-body">
     <p class="caption">One bar per solution, length = score (API). Colored segments: computed surplus per token pair; gray segment: implied fees.
-      Black tick: baseline level for the pair (<span style="color:var(--violation)">red</span> if the segment falls short → filtered).
-      Blue marker on a winner: the gap from the marker to the end of the bar is its reward basis (winners total − reference score, uncapped).
+      Black tick: baseline level for the pair, drawn for multi-pair bars only (<span style="color:var(--violation)">red</span> if the segment falls short → filtered).
+      ✕: filtered out by the API; (f): filtered only in the local surplus-based rerun.
+      Blue bracket under a winner's bar end: spans its reward basis (winners total − reference score, uncapped).
       <span style="color:#b07aa1">Purple dashed tick</span>: quote level — the surplus the solution's trades would give if executed at their (fee-adjusted) quoted prices.
       Click a bar to locate the solution in the table.</p>
+    <div id="pair-legend" class="caption"></div>
     <div id="ladder"></div>
   </div>
 </details>
@@ -121,7 +124,7 @@
   </div>
 </details>
 <details id="trace-section">
-  <summary>selection trace</summary>
+  <summary>selection trace <span class="summary-note" id="trace-headline"></span></summary>
   <div class="section-body">
     <p class="caption">Step-by-step rerun of the mechanism on surplus-based scores: fairness filtering, then greedy selection by score
       with compatibility on directed token pairs. Click a line to locate the solution in the table.
@@ -153,7 +156,11 @@ function fmtNative(weiStr, digits = 5) {
 function fmtAmount(atomStr, tokenAddr) {
   const info = DATA.tokens[tokenAddr];
   if (!info) return atomStr + " atoms";
-  return (Number(atomStr) / 10 ** info.decimals).toLocaleString("en-US", { maximumFractionDigits: 6 }) + " " + info.symbol;
+  const value = Number(atomStr) / 10 ** info.decimals;
+  if (value === 0) return "0 " + info.symbol;
+  const abs = Math.abs(value);
+  if (abs < 1e-9) return value.toExponential(2) + " " + info.symbol;
+  return value.toLocaleString("en-US", { maximumFractionDigits: Math.max(6, -Math.floor(Math.log10(abs)) + 2) }) + " " + info.symbol;
 }
 const addrLink = (addr) => `<a class="addr" href="${DATA.explorerBase}/address/${addr}" target="_blank">${SHORT(addr)}</a>`;
 const solverLabel = (addr) => DATA.solverNames[addr.toLowerCase()] || SHORT(addr);
@@ -163,9 +170,10 @@ const isLocalWinner = (i) => A.winnerIndices.includes(i);
 const isLocalFiltered = (i) => A.filteredIndices.includes(i);
 const isFiltered = (sol) => sol.filteredOutApi || isLocalFiltered(sol.index);
 
-const allCols = DATA.solutions.slice().sort((a, b) => (a.ranking ?? 1e9) - (b.ranking ?? 1e9));
-const PAIR_KEYS = DATA.pairs.map((pair) => pair.sellToken + "|" + pair.buyToken);
-const PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#b07aa1", "#76b7b2", "#edc948", "#ff9da7", "#9c755f", "#bab0ab"];
+const rankedSolutions = DATA.solutions.slice().sort((a, b) => (a.ranking ?? 1e9) - (b.ranking ?? 1e9));
+const PAIR_KEYS = DATA.pairs.map((pair) => pair.key);
+/* no purple (quote marker) and no light gray (implied fees) in the pair palette */
+const PALETTE = ["#4e79a7", "#f28e2b", "#59a14f", "#e15759", "#76b7b2", "#edc948", "#ff9da7", "#9c755f"];
 const pairColor = (key) => PALETTE[PAIR_KEYS.indexOf(key) % PALETTE.length];
 const SVGNS = "http://www.w3.org/2000/svg";
 function svgEl(tag, attrs, parent, textContent) {
@@ -188,14 +196,15 @@ function sameCluster(a, b) {
   });
 }
 const clusters = [];
-for (const sol of allCols) {
+for (const sol of rankedSolutions) {
   const cluster = clusters.find((c) => sameCluster(c.members[0], sol));
   if (cluster) cluster.members.push(sol);
   else clusters.push({ id: clusters.length, members: [sol] });
 }
 
+const COLLAPSE_ABOVE_COLUMNS = 16;
 const state = {
-  collapse: allCols.length > 16 && clusters.length < allCols.length,
+  collapse: rankedSolutions.length > COLLAPSE_ABOVE_COLUMNS && clusters.length < rankedSolutions.length,
   heat: true,
   delta: false,
   keyOnly: false,
@@ -222,12 +231,12 @@ function computeColumns() {
     }
   }
   if (state.keyOnly) {
-    columns = columns.filter((column) =>
-      (column.collapsed ? column.cluster.members : [column.sol]).some((m) => keySet.has(m.index)));
+    columns = columns.filter((column) => colMembers(column).some((m) => keySet.has(m.index)));
   }
 }
-const colContains = (column, index) =>
-  column.collapsed ? column.cluster.members.some((m) => m.index === index) : column.sol.index === index;
+/* the solutions a table column stands for: the whole cluster when collapsed */
+const colMembers = (column) => column.collapsed ? column.cluster.members : [column.sol];
+const colContains = (column, index) => colMembers(column).some((m) => m.index === index);
 const colIndexOf = (index) => columns.findIndex((column) => colContains(column, index)) + 1;
 
 /* ---------- header and legend ---------- */
@@ -235,7 +244,10 @@ document.getElementById("title").textContent = `Auction ${DATA.auctionId} — ${
 document.getElementById("meta").innerHTML = [
   `blocks ${DATA.auctionStartBlock}–${DATA.auctionDeadlineBlock}`,
   `${DATA.solutions.length} solutions, ${DATA.pairs.length} directed token pairs, ${Object.keys(DATA.orders).length} orders`,
-  ...DATA.transactionHashes.map((tx) => `settlement <a href="${DATA.explorerBase}/tx/${tx}" target="_blank">${SHORT(tx, 8)}</a>`),
+  ...DATA.transactionHashes.map((tx) => {
+    const winner = DATA.solutions.find((sol) => sol.txHash === tx);
+    return `settlement${winner ? " by " + solverLabel(winner.solver) : ""} <a href="${DATA.explorerBase}/tx/${tx}" target="_blank">${SHORT(tx, 8)}</a>`;
+  }),
 ].join(" · ");
 
 document.getElementById("legend").innerHTML = [
@@ -252,7 +264,7 @@ document.getElementById("controls").innerHTML = [
   `<label><input type="checkbox" id="delta-toggle" title="show cells as % below the best value in their row"> Δ vs best</label>`,
   `<label><input type="checkbox" id="collapse-toggle"> collapse similar solutions</label>`,
   `<label><input type="checkbox" id="key-toggle" title="show only winners, baselines, filtered solutions, and reference solutions"> key columns only</label>`,
-  `<span class="hint">click: winner → references, trade row → executions, solver name → their solutions</span>`,
+  `<span class="hint">click: winner → references, order id → executions, solver name → their solutions · Esc clears</span>`,
 ].join("");
 function bindToggle(id, key, extra) {
   const toggle = document.getElementById(id);
@@ -265,68 +277,95 @@ bindToggle("collapse-toggle", "collapse", () => state.expanded.clear());
 bindToggle("key-toggle", "keyOnly");
 
 /* ---------- score ladder ---------- */
+/* quote level of a solution: surplus if all trades were executed at their quoted prices */
+function quoteInfo(sol) {
+  const parts = Object.values(sol.trades).map((t) => t.quoteSurplus).filter((q) => q !== null);
+  return {
+    sum: parts.reduce((sum, q) => sum + Number(q), 0),
+    available: parts.length,
+    partial: parts.length < Object.keys(sol.trades).length,
+  };
+}
+
+function buildPairLegend() {
+  document.getElementById("pair-legend").innerHTML = [
+    ...PAIR_KEYS.map((key) =>
+      `<span style="white-space:nowrap;margin-right:14px"><span class="chip" style="background:${pairColor(key)}"></span>${pairLabel(key)}</span>`),
+    `<span style="white-space:nowrap"><span class="chip" style="background:#c9c9c9"></span>implied fees</span>`,
+  ].join("");
+}
+
 function buildLadder() {
   const labelW = 190, rowH = 17, barH = 10, valueW = 90;
   const width = Math.min(Math.max(document.body.clientWidth - 60, 700), 1400);
   const barSpan = width - labelW - valueW;
-  const quoteSum = (sol) => Object.values(sol.trades)
-    .reduce((sum, t) => sum + (t.quoteSurplus !== null ? Number(t.quoteSurplus) : 0), 0);
-  const maxLen = Math.max(...allCols.map((sol) =>
-    Math.max(Number(sol.scoreApi), Number(sol.surplusTotal), quoteSum(sol))), 1);
+  const maxLen = Math.max(...rankedSolutions.map((sol) =>
+    Math.max(Number(sol.scoreApi), Number(sol.surplusTotal), quoteInfo(sol).sum)), 1);
   const scale = (v) => (v / maxLen) * barSpan;
-  const winnersTotalApi = allCols.filter((sol) => sol.isWinner).reduce((sum, sol) => sum + Number(sol.scoreApi), 0);
-  const svg = svgEl("svg", { width, height: allCols.length * rowH + 6 });
-  allCols.forEach((sol, row) => {
+  const winnersTotalApi = rankedSolutions.filter((sol) => sol.isWinner).reduce((sum, sol) => sum + Number(sol.scoreApi), 0);
+  const svg = svgEl("svg", { width, height: rankedSolutions.length * rowH + 6 });
+  rankedSolutions.forEach((sol, row) => {
     const y = row * rowH + 3;
     const group = svgEl("g", { class: "clickable" }, svg);
     group.addEventListener("click", () => focusColumn(sol));
-    const filtered = isFiltered(sol);
-    if (filtered) group.setAttribute("opacity", "0.5");
-    const label = `#${sol.ranking ?? "–"} ${solverLabel(sol.solver)}` + (sol.isWinner ? " ✓" : "") + (filtered ? " ✕" : "");
+    const localOnlyFiltered = !sol.filteredOutApi && isLocalFiltered(sol.index);
+    if (sol.filteredOutApi) group.setAttribute("opacity", "0.5");
+    const label = `#${sol.ranking ?? "–"} ${solverLabel(sol.solver)}` + (sol.isWinner ? " ✓" : "")
+      + (sol.filteredOutApi ? " ✕" : localOnlyFiltered ? " (f)" : "");
     const labelText = svgEl("text", { x: labelW - 8, y: y + barH - 1, "text-anchor": "end" }, group, label);
     if (sol.isWinner) labelText.setAttribute("font-weight", "600");
-    if (filtered) labelText.setAttribute("fill", "#999");
+    if (sol.filteredOutApi) labelText.setAttribute("fill", "#999");
     svgTitle(group, `#${sol.ranking ?? "–"} ${solverLabel(sol.solver)} — score ${fmtNative(sol.scoreApi)} ${NAT}, surplus ${fmtNative(sol.surplusTotal)} ${NAT}`
-      + (sol.isWinner ? " (winner)" : "") + (filtered ? " (filtered out)" : ""));
+      + (sol.isWinner ? " (winner)" : "") + (sol.filteredOutApi ? " (filtered out by the API)" : "")
+      + (localOnlyFiltered ? " (filtered in the local surplus-based rerun, not by the API)" : "")
+      + ` — exact: score ${sol.scoreApi}, surplus ${sol.surplusTotal}`);
     // surplus segments per pair, in global pair order
     let cursor = 0;
     for (const key of PAIR_KEYS) {
-      const surplus = Number(sol.pairSurplus[key] ?? 0);
-      if (surplus <= 0) continue;
-      const segment = svgEl("rect", { x: labelW + scale(cursor), y, width: Math.max(scale(surplus), 0.5), height: barH, fill: pairColor(key) }, group);
+      if (!(key in sol.pairSurplus)) continue;
+      const surplus = Number(sol.pairSurplus[key]);
       const baseline = Number(A.baselines[key]?.surplus ?? 0);
-      svgTitle(segment, `${pairLabel(key)}: ${fmtNative(String(surplus))} ${NAT} surplus (baseline ${fmtNative(String(baseline))} ${NAT})`);
+      if (surplus > 0) {
+        const segment = svgEl("rect", { x: labelW + scale(cursor), y, width: Math.max(scale(surplus), 0.5), height: barH, fill: pairColor(key) }, group);
+        svgTitle(segment, `${pairLabel(key)}: ${fmtNative(String(surplus))} ${NAT} surplus (baseline ${fmtNative(String(baseline))} ${NAT})`);
+      }
       if (baseline > 0 && Object.keys(sol.pairSurplus).length > 1) {
         const short = baseline > surplus;
         svgEl("rect", { x: labelW + scale(cursor + baseline) - 0.75, y: y - 2, width: 1.5, height: barH + 4, fill: short ? "var(--violation)" : "#222" }, group);
       }
-      cursor += surplus;
+      if (surplus > 0) cursor += surplus;
     }
-    // implied fees segment
+    // implied fees segment: gray from the surplus segments to the API score
     const fees = Number(sol.scoreApi) - Number(sol.surplusTotal);
-    if (fees > 0) {
-      const segment = svgEl("rect", { x: labelW + scale(cursor), y, width: scale(fees), height: barH, fill: "#c9c9c9" }, group);
-      svgTitle(segment, `implied fees: ${fmtNative(String(fees))} ${NAT}`);
+    const gray = Number(sol.scoreApi) - cursor;
+    if (gray > 0) {
+      const segment = svgEl("rect", { x: labelW + scale(cursor), y, width: scale(gray), height: barH, fill: "#c9c9c9" }, group);
+      svgTitle(segment, `implied fees: ${fmtNative(String(fees))} ${NAT}`
+        + (cursor > Number(sol.surplusTotal) ? " (bar shortened: negative surplus on some pair is not drawn)" : ""));
     }
-    // quote level: surplus if all trades were executed at their quoted prices
-    const quoteParts = Object.values(sol.trades).map((t) => t.quoteSurplus).filter((q) => q !== null);
-    if (quoteParts.length) {
-      const quoteSum = quoteParts.reduce((sum, q) => sum + Number(q), 0);
-      const partial = quoteParts.length < Object.keys(sol.trades).length;
-      const marker = svgEl("line", { x1: labelW + scale(Math.max(quoteSum, 0)), x2: labelW + scale(Math.max(quoteSum, 0)),
+    // quote level marker
+    const quote = quoteInfo(sol);
+    if (quote.available) {
+      const marker = svgEl("line", { x1: labelW + scale(Math.max(quote.sum, 0)), x2: labelW + scale(Math.max(quote.sum, 0)),
         y1: y - 3, y2: y + barH + 3, stroke: "#b07aa1", "stroke-width": 2, "stroke-dasharray": "2,2" }, group);
-      svgTitle(marker, `quote level: ${fmtNative(String(quoteSum))} ${NAT} surplus if executed at the quoted prices`
-        + (quoteSum < 0 ? " (negative: quote below limit price, marker clamped to 0)" : "")
-        + (partial ? " (no quote available for some trades)" : ""));
+      svgTitle(marker, `quote level: ${fmtNative(String(quote.sum))} ${NAT} surplus if executed at the quoted prices`
+        + (quote.sum < 0 ? " (negative: quote below limit price, marker clamped to 0)" : "")
+        + (quote.partial ? " (no quote available for some trades)" : ""));
     }
-    // reward marker for winners: reference scores are totals over all winners,
-    // so the reward (total - reference) is drawn from the end of the bar
+    // reward bracket for winners: reference scores are totals over all winners,
+    // so only the length of the reward (total - reference) is meaningful; it is
+    // drawn as a bracket under the end of the bar
     const refApi = sol.isWinner ? sol.referenceScoreApi ?? DATA.referenceScoresApi[sol.solver] : null;
     if (refApi !== null && refApi !== undefined) {
       const reward = Math.max(winnersTotalApi - Number(refApi), 0);
-      const marker = svgEl("rect", { x: labelW + scale(Math.max(Number(sol.scoreApi) - reward, 0)) - 1, y: y - 3, width: 2, height: barH + 6, fill: "var(--reference)" }, group);
-      svgTitle(marker, `reward basis (uncapped): winners total ${fmtNative(String(winnersTotalApi))} − reference ${fmtNative(refApi)} = ${fmtNative(String(reward))} ${NAT}`
-        + " — shown as the gap from the marker to the end of the bar");
+      const x1 = labelW + scale(Math.max(Number(sol.scoreApi) - reward, 0));
+      const x2 = labelW + scale(Number(sol.scoreApi));
+      const bracketY = y + barH + 2;
+      const bracket = svgEl("g", {}, group);
+      svgEl("rect", { x: x1, y: bracketY, width: Math.max(x2 - x1, 1), height: 1.5, fill: "var(--reference)" }, bracket);
+      svgEl("rect", { x: x1, y: bracketY - 2.5, width: 1.5, height: 4, fill: "var(--reference)" }, bracket);
+      svgEl("rect", { x: x2 - 1.5, y: bracketY - 2.5, width: 1.5, height: 4, fill: "var(--reference)" }, bracket);
+      svgTitle(bracket, `reward basis (uncapped): winners total ${fmtNative(String(winnersTotalApi))} − reference ${fmtNative(refApi)} = ${fmtNative(String(reward))} ${NAT}`);
     }
     svgEl("text", { x: labelW + scale(Math.max(Number(sol.scoreApi), Number(sol.surplusTotal))) + 6, y: y + barH - 1, fill: "#777" }, group, fmtNative(sol.scoreApi));
   });
@@ -336,7 +375,7 @@ function buildLadder() {
 /* ---------- bundle structure ---------- */
 function buildBundles() {
   const bundleMap = new Map();
-  for (const sol of allCols) {
+  for (const sol of rankedSolutions) {
     const keys = Object.keys(sol.pairSurplus).sort();
     if (!keys.length) continue;
     const bundleKey = keys.join(",");
@@ -417,7 +456,12 @@ function buildBundles() {
    reward mechanism). */
 function computeTrace(excludeSolver) {
   const items = [];
-  const byScore = allCols.slice().sort((a, b) => Number(b.surplusTotal) - Number(a.surplusTotal));
+  // replicate the Python rerun exactly: stable sort over the API list order,
+  // descending by exact score (Number would collapse near-ties)
+  const byScore = DATA.solutions.slice().sort((a, b) => {
+    const diff = BigInt(b.surplusTotal) - BigInt(a.surplusTotal);
+    return diff > 0n ? 1 : diff < 0n ? -1 : 0;
+  });
   const taken = new Set();
   for (const sol of byScore) {
     const pairs = Object.keys(sol.pairSurplus);
@@ -446,7 +490,12 @@ function computeTrace(excludeSolver) {
 
 function buildTrace() {
   const list = document.getElementById("trace");
-  for (const item of computeTrace(null)) {
+  const items = computeTrace(null);
+  const disagreements = items.filter((item) => item.warn).length;
+  document.getElementById("trace-headline").textContent = disagreements
+    ? `— ⚠ ${disagreements} disagreement${disagreements > 1 ? "s" : ""} with the API outcome`
+    : "— reproduces the API outcome";
+  for (const item of items) {
     const li = document.createElement("li");
     li.className = item.cls;
     li.innerHTML = `<span class="status">${item.status}</span> #${item.sol.ranking ?? "–"} ${solverLabel(item.sol.solver)}`
@@ -496,6 +545,67 @@ function displayValue(valueStr, best) {
   return "−" + (pct >= 9.95 ? pct.toFixed(0) : pct >= 0.0995 ? pct.toFixed(1) : pct.toExponential(1)) + "%";
 }
 
+function buildHeaderCell(column) {
+  const sol = column.sol;
+  const th = document.createElement("th");
+  const badges = [];
+  const members = colMembers(column);
+  if (members.some((m) => m.isWinner)) {
+    th.classList.add("winner-head");
+    badges.push(`<span class="badge winner" title="winner according to the API">W</span>`);
+  }
+  if (members.some((m) => isLocalWinner(m.index))) badges.push(`<span class="badge local" title="winner of the local surplus-based rerun">L</span>`);
+  if (members.some((m) => m.filteredOutApi)) badges.push(`<span class="badge filtered" title="filtered out according to the API">F</span>`);
+  if (members.some((m) => isLocalFiltered(m.index) && !m.filteredOutApi)) badges.push(`<span class="badge filtered-local" title="filtered by the local surplus-based baseline check (but not by the API)">f</span>`);
+  const baselinePairs = Object.entries(A.baselines).filter(([, b]) => members.some((m) => m.index === b.solutionIndex)).map(([k]) => k);
+  if (baselinePairs.length) badges.push(`<span class="badge baseline" title="baseline solution for ${baselinePairs.map(pairLabel).join(", ")}">B</span>`);
+  if (column.collapsed) badges.push(`<span class="badge cluster" title="${column.cluster.members.length} near-identical solutions by this solver (ranks ${column.cluster.members.map((m) => "#" + m.ranking).join(", ")}); click to expand">+${column.cluster.members.length - 1}</span>`);
+  else if (state.collapse && column.cluster.members.length > 1) badges.push(`<span class="badge cluster" title="click to collapse the ${column.cluster.members.length} near-identical solutions of this solver again">⊟</span>`);
+  th.innerHTML = `<div>#${sol.ranking ?? "–"} <span class="solver" title="click to highlight all solutions by ${solverLabel(sol.solver)}">${solverLabel(sol.solver)}</span></div>`
+    + `<div class="addr-line">${addrLink(sol.solver)}</div><div class="badges">${badges.join("")}</div>`;
+  th.querySelector(".solver").addEventListener("click", (event) => {
+    event.stopPropagation();
+    showSolver(sol.solver);
+  });
+  const clusterBadge = th.querySelector(".badge.cluster");
+  if (clusterBadge) clusterBadge.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (column.collapsed) state.expanded.add(column.cluster.id);
+    else state.expanded.delete(column.cluster.id);
+    renderTable();
+  });
+  if (members.some((m) => m.isWinner || isLocalWinner(m.index))) {
+    th.classList.add("clickable");
+    th.title = "click to show reference solutions (best outcome without this solver)";
+    th.addEventListener("click", () => showReference(sol));
+  }
+  return th;
+}
+
+function addSummaryRows(addRow) {
+  addRow("summary-row first", `score (API, surplus + fees, ${NAT})`, (sol, td) => {
+    td.textContent = fmtNative(sol.scoreApi);
+    td.title = `exact ${sol.scoreApi}`;
+    td.style.fontWeight = "600";
+  });
+  addRow("summary-row", `surplus (computed, ${NAT})`, (sol, td) => {
+    td.textContent = fmtNative(sol.surplusTotal);
+    td.title = `exact ${sol.surplusTotal}`;
+  });
+  addRow("summary-row", `implied fees (score − surplus, ${NAT})`, (sol, td) => {
+    const hasUnknown = Object.values(sol.trades).some((t) => t.surplus === null);
+    const fees = BigInt(sol.scoreApi) - BigInt(sol.surplusTotal);
+    td.textContent = fmtNative(String(fees)) + (hasUnknown ? " ⚠" : "");
+    td.title = `exact ${fees}` + (hasUnknown ? " — some trade surplus unknown, implied fees unreliable" : "");
+  });
+  addRow("summary-row", `reference score (API, per solver, ${NAT})`, (sol, td) => {
+    const ref = sol.referenceScoreApi ?? DATA.referenceScoresApi[sol.solver];
+    if (ref === undefined || ref === null) { td.textContent = "·"; td.classList.add("empty"); return; }
+    td.textContent = fmtNative(ref);
+    td.title = `exact ${ref}`;
+  });
+}
+
 function renderTable() {
   clearHighlights();
   computeColumns();
@@ -505,8 +615,8 @@ function renderTable() {
   colgroup.appendChild(document.createElement("col"));
   for (const column of columns) {
     const col = document.createElement("col");
-    if (column.collapsed ? column.cluster.members.every(isFiltered) : isFiltered(column.sol)) col.classList.add("filtered-col");
-    else if (column.collapsed ? column.cluster.members.some((m) => m.isWinner) : column.sol.isWinner) col.classList.add("winner-col");
+    if (colMembers(column).every(isFiltered)) col.classList.add("filtered-col");
+    else if (colMembers(column).some((m) => m.isWinner)) col.classList.add("winner-col");
     colgroup.appendChild(col);
   }
   table.appendChild(colgroup);
@@ -514,39 +624,7 @@ function renderTable() {
   thead = document.createElement("thead");
   const headRow = document.createElement("tr");
   headRow.innerHTML = "<th>token pair / order</th>";
-  for (const column of columns) {
-    const sol = column.sol;
-    const th = document.createElement("th");
-    const badges = [];
-    const members = column.collapsed ? column.cluster.members : [sol];
-    if (members.some((m) => m.isWinner)) badges.push(`<span class="badge winner" title="winner according to the API">W</span>`);
-    if (members.some((m) => isLocalWinner(m.index))) badges.push(`<span class="badge local" title="winner of the local surplus-based rerun">L</span>`);
-    if (members.some((m) => m.filteredOutApi)) badges.push(`<span class="badge filtered" title="filtered out according to the API">F</span>`);
-    if (members.some((m) => isLocalFiltered(m.index) && !m.filteredOutApi)) badges.push(`<span class="badge filtered-local" title="filtered by the local surplus-based baseline check (but not by the API)">f</span>`);
-    const baselinePairs = Object.entries(A.baselines).filter(([, b]) => members.some((m) => m.index === b.solutionIndex)).map(([k]) => k);
-    if (baselinePairs.length) badges.push(`<span class="badge baseline" title="baseline solution for ${baselinePairs.map(pairLabel).join(", ")}">B</span>`);
-    if (column.collapsed) badges.push(`<span class="badge cluster" title="${column.cluster.members.length} near-identical solutions by this solver (ranks ${column.cluster.members.map((m) => "#" + m.ranking).join(", ")}); click to expand">+${column.cluster.members.length - 1}</span>`);
-    else if (state.collapse && column.cluster.members.length > 1) badges.push(`<span class="badge cluster" title="click to collapse the ${column.cluster.members.length} near-identical solutions of this solver again">⊟</span>`);
-    th.innerHTML = `<div>#${sol.ranking ?? "–"} <span class="solver" title="click to highlight all solutions by ${solverLabel(sol.solver)}">${solverLabel(sol.solver)}</span></div>`
-      + `<div class="addr-line">${addrLink(sol.solver)}</div><div class="badges">${badges.join("")}</div>`;
-    th.querySelector(".solver").addEventListener("click", (event) => {
-      event.stopPropagation();
-      showSolver(sol.solver);
-    });
-    const clusterBadge = th.querySelector(".badge.cluster");
-    if (clusterBadge) clusterBadge.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (column.collapsed) state.expanded.add(column.cluster.id);
-      else state.expanded.delete(column.cluster.id);
-      renderTable();
-    });
-    if (members.some((m) => m.isWinner || isLocalWinner(m.index))) {
-      th.classList.add("clickable");
-      th.title = "click to show reference solutions (best outcome without this solver)";
-      th.addEventListener("click", () => showReference(sol));
-    }
-    headRow.appendChild(th);
-  }
+  for (const column of columns) headRow.appendChild(buildHeaderCell(column));
   thead.appendChild(headRow);
   table.appendChild(thead);
 
@@ -561,7 +639,7 @@ function renderTable() {
     for (const column of columns) {
       const td = document.createElement("td");
       td.className = "num";
-      if (column.collapsed ? column.cluster.members.every(isFiltered) : isFiltered(column.sol)) td.classList.add("filtered-col-text");
+      if (colMembers(column).every(isFiltered)) td.classList.add("filtered-col-text");
       cellFor(column.sol, td, column);
       tr.appendChild(td);
     }
@@ -570,18 +648,18 @@ function renderTable() {
   }
 
   for (const pair of DATA.pairs) {
-    const key = pair.sellToken + "|" + pair.buyToken;
+    const key = pair.key;
     const baseline = A.baselines[key];
     const bestPairSurplus = Math.max(...columns.map((column) => Number(column.sol.pairSurplus[key] ?? 0)));
     addRow("pair-row", `<span class="chip" style="background:${pairColor(key)}"></span>${pairLabel(key)} <span style="color:#999;font-weight:normal">(${pair.orderUids.length} order${pair.orderUids.length > 1 ? "s" : ""})</span>`, (sol, td, column) => {
       const surplus = sol.pairSurplus[key];
       if (surplus === undefined) { td.textContent = "·"; td.classList.add("empty"); return; }
       td.textContent = displayValue(surplus, bestPairSurplus);
-      td.title = `${fmtNative(surplus)} ${NAT} surplus on this pair`;
+      td.title = `${fmtNative(surplus)} ${NAT} surplus on this pair (exact ${surplus})`;
       td.style.background = heatColor(Number(surplus), bestPairSurplus);
       if (baseline && colContains(column, baseline.solutionIndex)) {
         td.classList.add("baseline-cell");
-        td.title = "baseline solution for this pair (best single-pair solution)";
+        td.title += " — baseline solution for this pair (best single-pair solution)";
       }
       const violation = (A.violations[sol.index] || []).find((v) => v.pair === key);
       if (violation) {
@@ -602,9 +680,9 @@ function renderTable() {
         if (!trade) { td.textContent = "·"; td.classList.add("empty"); return; }
         td.textContent = displayValue(trade.surplus, bestTradeSurplus);
         td.style.background = heatColor(trade.surplus === null ? null : Number(trade.surplus), bestTradeSurplus);
-        const [sellTok, buyTok] = key.split("|");
-        td.title = `executes ${fmtAmount(trade.sellAmount, sellTok)} → ${fmtAmount(trade.buyAmount, buyTok)}`
-          + (trade.surplus === null ? " (surplus unknown: no order data or native price)" : ` for ${fmtNative(trade.surplus)} ${NAT} surplus`);
+        td.title = `executes ${fmtAmount(trade.sellAmount, pair.sellToken)} → ${fmtAmount(trade.buyAmount, pair.buyToken)}`
+          + (trade.surplus === null ? " (surplus unknown: no order data or native price)"
+                                    : ` for ${fmtNative(trade.surplus)} ${NAT} surplus (exact ${trade.surplus})`);
       });
       const rowHead = tr.querySelector("th");
       rowHead.classList.add("clickable");
@@ -615,21 +693,7 @@ function renderTable() {
     }
   }
 
-  addRow("summary-row first", `score (API, surplus + fees, ${NAT})`, (sol, td) => {
-    td.textContent = fmtNative(sol.scoreApi);
-    td.style.fontWeight = "600";
-  });
-  addRow("summary-row", `surplus (computed, ${NAT})`, (sol, td) => { td.textContent = fmtNative(sol.surplusTotal); });
-  addRow("summary-row", `implied fees (score − surplus, ${NAT})`, (sol, td) => {
-    const hasUnknown = Object.values(sol.trades).some((t) => t.surplus === null);
-    td.textContent = fmtNative(String(Number(sol.scoreApi) - Number(sol.surplusTotal))) + (hasUnknown ? " ⚠" : "");
-    if (hasUnknown) td.title = "some trade surplus unknown – implied fees unreliable";
-  });
-  addRow("summary-row", `reference score (API, ${NAT})`, (sol, td) => {
-    const ref = sol.referenceScoreApi ?? DATA.referenceScoresApi[sol.solver];
-    if (ref === undefined || ref === null) { td.textContent = "·"; td.classList.add("empty"); return; }
-    td.textContent = fmtNative(ref);
-  });
+  addSummaryRows(addRow);
 
   tbody.lastChild.querySelectorAll("th,td").forEach((cell) => (cell.style.borderBottom = "none"));
   table.appendChild(tbody);
@@ -683,7 +747,7 @@ function focusColumn(sol) {
 
 function showSolver(solver) {
   if (!toggleHighlight("solver:" + solver)) return;
-  const own = allCols.filter((sol) => sol.solver === solver);
+  const own = rankedSolutions.filter((sol) => sol.solver === solver);
   for (const sol of own) {
     const index = colIndexOf(sol.index);
     if (index >= 1) colgroup.children[index].classList.add("solver-col");
@@ -695,13 +759,16 @@ function showSolver(solver) {
 }
 
 function stripPlot(entries, uid) {
+  const order = DATA.orders[uid];
   const values = entries.filter((sol) => sol.trades[uid].surplus !== null)
     .map((sol) => ({ sol, value: Number(sol.trades[uid].surplus) }));
   // quote level: take the execution with the largest fill as representative
+  // (fill measured in the executed amount the order is denominated in)
+  const fillOf = (trade) => Number(order.found && order.kind === "buy" ? trade.buyAmount : trade.sellAmount);
   const withQuote = entries.filter((sol) => sol.trades[uid].quoteSurplus !== null);
   const quote = withQuote.length
     ? Number(withQuote.reduce((a, b) =>
-        Number(b.trades[uid].sellAmount) > Number(a.trades[uid].sellAmount) ? b : a).trades[uid].quoteSurplus)
+        fillOf(b.trades[uid]) > fillOf(a.trades[uid]) ? b : a).trades[uid].quoteSurplus)
     : null;
   // the axis spans executions AND the quote, so a quote better than all executions sits beyond the dots
   const max = Math.max(...values.map((e) => e.value), quote ?? 0, 0);
@@ -738,23 +805,40 @@ function stripPlot(entries, uid) {
       `<circle cx="${x}" cy="${axisY - 5 - (level - 1) * 9}" r="3.6" fill="${dotColor(sol)}" fill-opacity="0.85">
          <title>#${sol.ranking ?? "–"} ${solverLabel(sol.solver)}: ${fmtNative(String(value))} ${NAT}</title></circle>`).join("")}
     </g>
-  </svg>`;
+  </svg>
+  <div class="note">dots: <span style="color:var(--winner-strong)">●</span> winner (API) ·
+    <span style="color:#4e79a7">●</span> other · <span style="color:#aaa">●</span> filtered out</div>`;
 }
 
 function showTrade(uid, key, rowHead) {
   if (!toggleHighlight("trade:" + uid)) return;
   rowHead.classList.add("selected");
   const [sellTok, buyTok] = key.split("|");
-  const entries = allCols.filter((sol) => sol.trades[uid]);
+  const entries = rankedSolutions.filter((sol) => sol.trades[uid]);
   for (const sol of entries) {
     const index = colIndexOf(sol.index);
     if (index >= 1) colgroup.children[index].classList.add("trade-col");
   }
   entries.sort((a, b) => Number(b.trades[uid].surplus ?? -1) - Number(a.trades[uid].surplus ?? -1));
   const order = DATA.orders[uid];
+  // share of the order's limit amount filled by an execution, in the executed token
+  const fillPct = (trade) => {
+    if (!order.found) return "";
+    const executed = Number(order.kind === "buy" ? trade.buyAmount : trade.sellAmount);
+    const limit = Number(order.kind === "buy" ? order.limitBuy : order.limitSell);
+    return limit > 0 ? `fill ${(100 * executed / limit).toFixed(0)}%` : "";
+  };
+  const nativePrice = (tokenAddr) => {
+    const price = DATA.nativePrices && DATA.nativePrices[tokenAddr];
+    const info = DATA.tokens[tokenAddr];
+    if (!price || !info) return "";
+    const unitWei = Number(price) * 10 ** info.decimals / 1e18;
+    return `, 1 ${info.symbol} ≈ ${fmtNative(String(unitWei))} ${NAT}`;
+  };
   const orderInfo = order.found
     ? `${order.kind} order, limit ${fmtAmount(order.limitSell, sellTok)} → ${fmtAmount(order.limitBuy, buyTok)}`
       + (order.quoteSell ? `, quoted ${fmtAmount(order.quoteSell, sellTok)} → ${fmtAmount(order.quoteBuy, buyTok)} (fee-adjusted)` : "")
+      + nativePrice(buyTok)
     : "order not in the orderbook API – likely a JIT order";
   openPopup(`Trade ${SHORT(uid, 6)} (${pairLabel(key)})`,
     `<div class="note"><a class="order" href="${DATA.cowExplorerOrderBase}${uid}" target="_blank">view on CoW explorer</a> — ${orderInfo}.
@@ -764,7 +848,8 @@ function showTrade(uid, key, rowHead) {
        const trade = sol.trades[uid];
        return `<tr><td>#${sol.ranking ?? "–"} ${solverLabel(sol.solver)}${colMarks(sol)}</td>
          <td class="num">${trade.surplus === null ? "?" : fmtNative(trade.surplus) + " " + NAT}</td>
-         <td class="num" style="color:#777">${fmtAmount(trade.sellAmount, sellTok)} → ${fmtAmount(trade.buyAmount, buyTok)}</td></tr>`;
+         <td class="num" style="color:#777">${fmtAmount(trade.sellAmount, sellTok)} → ${fmtAmount(trade.buyAmount, buyTok)}</td>
+         <td class="num" style="color:#777">${fillPct(trade)}</td></tr>`;
      }).join("")}</table>`);
 }
 
@@ -787,19 +872,23 @@ function showReference(sol) {
   if (refApi !== undefined && refApi !== null) rows.push(["reference score (API, score-based)", fmtNative(refApi)]);
   if (ref) {
     rows.push(["reference score (local, surplus-based)", fmtNative(ref.score)]);
-    rows.push(["⇒ surplus-based reward proxy", fmtNative(String(Number(A.winnersTotal) - Number(ref.score)))]);
+    rows.push(["⇒ surplus-based reward proxy (unclamped)", fmtNative(String(Number(A.winnersTotal) - Number(ref.score)))]);
   }
   openPopup(`Reference for ${solverLabel(sol.solver)}`,
     `<table>${rows.map(([k, v]) => `<tr><th style="text-align:left">${k}</th><td class="num">${v} ${NAT}</td></tr>`).join("")}</table>
-    ${ref && ref.solutionIndices.length
-      ? `<div class="note">Reference selection — rerunning the greedy selection without ${solverLabel(sol.solver)}
-           (reference solutions highlighted blue in the table):</div>${miniTraceHtml(sol.solver)}`
-      : `<div class="note">No reference solutions: without this solver nothing would have been executed.</div>`}
+    ${ref
+      ? (ref.solutionIndices.length
+        ? `<div class="note">Reference selection — rerunning the greedy selection without ${solverLabel(sol.solver)}
+             (reference solutions highlighted blue in the table):</div>${miniTraceHtml(sol.solver)}`
+        : `<div class="note">No reference solutions: without this solver nothing would have been executed.</div>`)
+      : `<div class="note">No local reference: this solver wins per the API but is not a winner of the local
+           surplus-based rerun, so no reference selection was computed.</div>`}
     <div class="note">API reference scores are based on score = surplus + fees; the local rerun uses computed surplus only (fees for non-executed bids are not available from the API), so the two can differ.</div>`);
 }
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") clearHighlights(); });
 
 /* ---------- initial render ---------- */
+buildPairLegend();
 buildLadder();
 buildBundles();
 buildTrace();
