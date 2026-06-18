@@ -1,9 +1,7 @@
 """Functionality for fetching solutions data from the competition endpoint."""
 
 import itertools
-import math
 import pickle
-from fractions import Fraction
 from os import getenv
 from typing import Any, Literal
 
@@ -11,7 +9,7 @@ from dotenv import load_dotenv
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
-from mechanism import Solution, Trade, aggregate_scores
+from mechanism import Solution, Trade, aggregate_scores, compute_surplus_score
 
 load_dotenv()
 
@@ -130,20 +128,14 @@ def fetch_auctions(auction_start, auction_end):
 
 
 def compute_score(trade_data) -> int:
-    limit_sell = int(trade_data["limit_sell_amount"])
-    limit_buy = int(trade_data["limit_buy_amount"])
-    executed_sell = int(trade_data["executed_sell_amount"])
-    executed_buy = int(trade_data["executed_buy_amount"])
-    buy_price = Fraction(int(trade_data["buy_token_price"]), 10**18)
-    if trade_data["kind"] == "sell":
-        partial_limit_buy = math.ceil(Fraction(limit_buy * executed_sell, limit_sell))
-        surplus = executed_buy - partial_limit_buy
-        score = math.floor(surplus * buy_price)
-    else:
-        partial_limit_sell = math.floor(Fraction(limit_sell * executed_buy, limit_buy))
-        surplus = partial_limit_sell - executed_sell
-        score = math.floor(surplus * Fraction(limit_buy, limit_sell) * buy_price)
-    return score
+    return compute_surplus_score(
+        kind=trade_data["kind"],
+        limit_sell=int(trade_data["limit_sell_amount"]),
+        limit_buy=int(trade_data["limit_buy_amount"]),
+        executed_sell=int(trade_data["executed_sell_amount"]),
+        executed_buy=int(trade_data["executed_buy_amount"]),
+        buy_token_price=int(trade_data["buy_token_price"]),
+    )
 
 
 def compute_split_solutions(
